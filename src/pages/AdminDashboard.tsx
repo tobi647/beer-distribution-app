@@ -1,84 +1,70 @@
-import { useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+import DashboardLayout from '../layouts/DashboardLayout';
+import StockManager from '../components/admin/StockManager';
 
-export default function AdminDashboard() {
-  const navigate = useNavigate();
+const AdminDashboard = () => {
+  const [activeTab, setActiveTab] = useState<'stock' | 'orders' | 'stats'>('stock');
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      <nav className="bg-white shadow-gentle">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex items-center">
-              <h1 className="text-xl font-sansation">Admin Dashboard</h1>
-            </div>
-            <div className="flex items-center">
-              <button
-                onClick={() => navigate('/')}
-                className="btn-secondary"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
-        </div>
-      </nav>
-
-      <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        <div className="px-4 py-6 sm:px-0">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {/* Total Clients Card */}
-            <div className="card">
-              <div className="flex items-center">
-                <div className="flex-shrink-0 bg-bauhinia rounded-lg p-3">
-                  <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-                  </svg>
-                </div>
-                <div className="ml-5 w-0 flex-1">
-                  <dl>
-                    <dt className="text-sm font-gotham text-gray-500 truncate">Total Clients</dt>
-                    <dd className="text-3xl font-gotham-bold text-gray-900">12</dd>
-                  </dl>
-                </div>
-              </div>
-            </div>
-
-            {/* Active Orders Card */}
-            <div className="card">
-              <div className="flex items-center">
-                <div className="flex-shrink-0 bg-natural-brown rounded-lg p-3">
-                  <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                  </svg>
-                </div>
-                <div className="ml-5 w-0 flex-1">
-                  <dl>
-                    <dt className="text-sm font-gotham text-gray-500 truncate">Active Orders</dt>
-                    <dd className="text-3xl font-gotham-bold text-gray-900">25</dd>
-                  </dl>
-                </div>
-              </div>
-            </div>
-
-            {/* Revenue Card */}
-            <div className="card">
-              <div className="flex items-center">
-                <div className="flex-shrink-0 bg-tropical-green rounded-lg p-3">
-                  <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-                <div className="ml-5 w-0 flex-1">
-                  <dl>
-                    <dt className="text-sm font-gotham text-gray-500 truncate">Revenue</dt>
-                    <dd className="text-3xl font-gotham-bold text-gray-900">$50k</dd>
-                  </dl>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+    <DashboardLayout userType="admin">
+      {/* Tab Navigation */}
+      <div className="mb-6">
+        <nav className="flex space-x-4">
+          <button
+            onClick={() => setActiveTab('stock')}
+            className={`px-3 py-2 rounded-md ${
+              activeTab === 'stock'
+                ? 'bg-blue-500 text-white'
+                : 'text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            Stock List
+          </button>
+          <button
+            onClick={() => setActiveTab('orders')}
+            className={`px-3 py-2 rounded-md ${
+              activeTab === 'orders'
+                ? 'bg-blue-500 text-white'
+                : 'text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            Order List
+          </button>
+          <button
+            onClick={() => setActiveTab('stats')}
+            className={`px-3 py-2 rounded-md ${
+              activeTab === 'stats'
+                ? 'bg-blue-500 text-white'
+                : 'text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            Sales Stats
+          </button>
+        </nav>
       </div>
-    </div>
+
+      {/* Content Area */}
+      <div className="bg-white shadow-sm rounded-lg p-6">
+        {activeTab === 'stock' && <StockManager />}
+
+        {activeTab === 'orders' && (
+          <div>
+            <h2 className="text-xl font-semibold mb-4">Order Management</h2>
+            {/* OrderManager component will go here */}
+            <p className="text-gray-500">Order management interface coming soon...</p>
+          </div>
+        )}
+
+        {activeTab === 'stats' && (
+          <div>
+            <h2 className="text-xl font-semibold mb-4">Sales Statistics</h2>
+            {/* StatsDisplay component will go here */}
+            <p className="text-gray-500">Sales statistics interface coming soon...</p>
+          </div>
+        )}
+      </div>
+    </DashboardLayout>
   );
-} 
+};
+
+export default AdminDashboard; 
