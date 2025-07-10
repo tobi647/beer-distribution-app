@@ -1,0 +1,52 @@
+/* Font imports - Replace with actual font files when available */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap'); /* Temporary fallback */
+
+/* Base styles */
+@layer base {
+  html {
+    @apply antialiased;
+  }
+
+  body {
+    @apply font-gotham bg-gray-100 text-black;
+  }
+
+  h1, h2 {
+    @apply font-sansation;
+  }
+
+  h3, h4 {
+    @apply font-gotham-bold;
+  }
+}
+
+/* Common UI patterns */
+@layer components {
+  .btn-primary {
+    @apply bg-bauhinia text-white px-4 py-2 rounded-lg hover:bg-opacity-90 transition-all hover:shadow-gentle;
+  }
+
+  .btn-secondary {
+    @apply bg-black text-white px-4 py-2 rounded-lg hover:bg-opacity-90 transition-all hover:shadow-gentle;
+  }
+
+  .card {
+    @apply bg-white rounded-lg shadow-gentle p-4;
+  }
+
+  .status-badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .status-badge-primary {
+    @apply status-badge bg-bauhinia-light text-bauhinia;
+  }
+
+  .form-input {
+    @apply w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-bauhinia;
+  }
+
+  .form-label {
+    @apply block mb-2 font-gotham-bold;
+  }
+} 
