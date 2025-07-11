@@ -49,6 +49,27 @@ interface AddSupplyFormData {
   reasonForCostChange?: string;
 }
 
+interface BulkSupplyEntry {
+  id: string;
+  productId: string;
+  productName: string;
+  quantity: number;
+  baseCost: number;
+  shippingCost: number;
+  additionalCosts: number;
+  supplier: string;
+  notes?: string;
+}
+
+interface BulkBatchFormData {
+  batchNumber?: string;
+  deliveryDate?: string;
+  origin?: string;
+  shippingMethod?: string;
+  generalNotes?: string;
+  entries: BulkSupplyEntry[];
+}
+
 type SortField = 'name' | 'type' | 'quantity' | 'baseCost' | 'totalCost' | 'sellingPrice' | 'minimumStock';
 type SortOrder = 'asc' | 'desc';
 
@@ -73,6 +94,8 @@ const StockManager = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [isAddSupplyModalOpen, setIsAddSupplyModalOpen] = useState(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [isBulkBatchModalOpen, setIsBulkBatchModalOpen] = useState(false);
+  const [bulkBatchEntries, setBulkBatchEntries] = useState<BulkSupplyEntry[]>([]);
 
   const {
     register,
@@ -114,6 +137,24 @@ const StockManager = () => {
       baseCost: 0,
       shippingCost: 0,
       additionalCosts: 0,
+    },
+    mode: 'onSubmit',
+    shouldFocusError: false,
+  });
+
+  const {
+    register: registerBulkBatch,
+    handleSubmit: handleSubmitBulkBatch,
+    reset: resetBulkBatch,
+    clearErrors: clearBulkBatchErrors,
+  } = useForm<BulkBatchFormData>({
+    defaultValues: {
+      batchNumber: '',
+      deliveryDate: '',
+      origin: 'Bauhinia Brewery',
+      shippingMethod: '',
+      generalNotes: '',
+      entries: [],
     },
     mode: 'onSubmit',
     shouldFocusError: false,
@@ -512,6 +553,162 @@ const StockManager = () => {
     }
   };
 
+  // Bulk Batch Functions
+  const handleOpenBulkBatch = () => {
+    setBulkBatchEntries([createEmptyBulkEntry()]);
+    setIsBulkBatchModalOpen(true);
+    clearBulkBatchErrors();
+  };
+
+  const createEmptyBulkEntry = (): BulkSupplyEntry => ({
+    id: generateId(),
+    productId: '',
+    productName: '',
+    quantity: 0,
+    baseCost: 0,
+    shippingCost: 0,
+    additionalCosts: 0,
+    supplier: 'Bauhinia Brewery',
+    notes: '',
+  });
+
+  const handleAddBulkEntry = () => {
+    setBulkBatchEntries(prev => [...prev, createEmptyBulkEntry()]);
+  };
+
+  const handleRemoveBulkEntry = (entryId: string) => {
+    setBulkBatchEntries(prev => prev.filter(entry => entry.id !== entryId));
+  };
+
+  const handleUpdateBulkEntry = (entryId: string, field: keyof BulkSupplyEntry, value: any) => {
+    setBulkBatchEntries(prev => prev.map(entry => 
+      entry.id === entryId ? { ...entry, [field]: value } : entry
+    ));
+  };
+
+  const handleBulkBatchSubmit = async (data: BulkBatchFormData) => {
+    const loadingToastId = showToast.loading('Processing bulk batch...');
+    
+    try {
+      const validEntries = bulkBatchEntries.filter(entry => 
+        entry.productId && entry.quantity > 0 && entry.baseCost > 0
+      );
+
+      if (validEntries.length === 0) {
+        showToast.update(loadingToastId, 'No valid entries to process', 'warning');
+        return;
+      }
+
+      const batchId = generateBatchId();
+      const currentDate = new Date();
+      const updatedStocks = [...stocks];
+      const processedEntries: Array<{stock: Required<BeerStock>, entry: SupplyEntry}> = [];
+
+      // Process each entry
+      for (const bulkEntry of validEntries) {
+        const stockIndex = updatedStocks.findIndex(s => s.id === bulkEntry.productId);
+        if (stockIndex === -1) continue;
+
+        const stock = updatedStocks[stockIndex];
+        const quantity = safeNumber(bulkEntry.quantity);
+        const baseCost = safeNumber(bulkEntry.baseCost);
+        const shippingCost = safeNumber(bulkEntry.shippingCost);
+        const additionalCosts = safeNumber(bulkEntry.additionalCosts);
+        
+        const newSupplyTotalCost = calculateTotalCost(baseCost, shippingCost, additionalCosts);
+        const newAverageCost = calculateWeightedAverageCost(
+          stock.quantity,
+          stock.totalCost,
+          quantity,
+          newSupplyTotalCost
+        );
+        const roundedAverageCost = roundToDecimal(newAverageCost);
+        const combinedQuantity = stock.quantity + quantity;
+
+        // Calculate batch comparison
+        let comparisonToPrevious;
+        if (stock.supplyHistory.length > 0) {
+          const lastSupply = stock.supplyHistory[0];
+          comparisonToPrevious = calculateBatchComparison(
+            baseCost, shippingCost, additionalCosts,
+            lastSupply.baseCost, lastSupply.shippingCost, lastSupply.additionalCosts
+          );
+        }
+
+        const supplyEntry: SupplyEntry = {
+          id: generateId(),
+          date: currentDate.toISOString(),
+          quantity,
+          baseCost,
+          shippingCost,
+          additionalCosts,
+          totalCost: newSupplyTotalCost,
+          notes: bulkEntry.notes || data.generalNotes,
+          supplier: bulkEntry.supplier,
+          profitMargin: calculateProfitMargin(stock.sellingPrice, roundedAverageCost),
+          priceChange: 0,
+          averageCostChange: roundedAverageCost - stock.totalCost,
+          wasAutoCalculated: true,
+          priceLockChanged: false,
+          // Enhanced batch tracking
+          batchId: `${batchId}-${bulkEntry.productName.substring(0, 3).toUpperCase()}`,
+          batchNumber: data.batchNumber || `BULK-${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(currentDate.getDate()).padStart(2, '0')}`,
+          deliveryDate: data.deliveryDate,
+          origin: data.origin,
+          shippingMethod: data.shippingMethod,
+          reasonForCostChange: `Bulk batch delivery: ${data.generalNotes || 'Regular supply delivery'}`,
+          comparisonToPrevious
+        };
+
+        // Calculate new selling price if not locked
+        let newSellingPrice = stock.sellingPrice;
+        if (!stock.isPriceLocked) {
+          newSellingPrice = calculateSellingPrice(
+            roundedAverageCost,
+            stock.markup,
+            stock.isMarkupPercentage
+          );
+          newSellingPrice = roundToDecimal(newSellingPrice);
+        }
+
+        // Update the stock
+        updatedStocks[stockIndex] = {
+          ...stock,
+          quantity: combinedQuantity,
+          baseCost: roundedAverageCost,
+          totalCost: roundedAverageCost,
+          sellingPrice: newSellingPrice,
+          available: true,
+          supplyHistory: [supplyEntry, ...stock.supplyHistory],
+        };
+
+        processedEntries.push({ stock: updatedStocks[stockIndex], entry: supplyEntry });
+      }
+
+      // Update all stocks at once
+      setStocks(updatedStocks);
+
+      // Generate success message
+      const totalUnits = processedEntries.reduce((sum, {entry}) => sum + entry.quantity, 0);
+      const totalProducts = processedEntries.length;
+      const totalInvestment = processedEntries.reduce((sum, {entry}) => sum + (entry.quantity * entry.totalCost), 0);
+
+      showToast.update(
+        loadingToastId, 
+        `Successfully processed bulk batch: ${totalProducts} products, ${totalUnits} total units, ${formatPeso(totalInvestment)} investment`, 
+        'success'
+      );
+
+      setIsBulkBatchModalOpen(false);
+      setBulkBatchEntries([]);
+      clearBulkBatchErrors();
+      resetBulkBatch();
+    } catch (error) {
+      console.error('Error processing bulk batch:', error);
+      showToast.update(loadingToastId, 'Failed to process bulk batch', 'error');
+    }
+  };
+
   const columns: Column[] = [
     {
       header: 'Name',
@@ -738,16 +935,27 @@ const StockManager = () => {
       {/* Header */}
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-gray-900 font-sansation">Stock Management</h2>
-        <button
-          onClick={() => {
-            setIsModalOpen(true);
-            setIsEditing(false);
-            setSelectedStock(null);
-          }}
-          className="px-4 py-2 bg-[#BE202E] text-white rounded-lg shadow-md hover:bg-opacity-90 transition-all duration-200 font-gotham"
-        >
-          Add New Stock
-        </button>
+        <div className="flex space-x-3">
+          <button
+            onClick={handleOpenBulkBatch}
+            className="px-4 py-2 bg-green-600 text-white rounded-lg shadow-md hover:bg-green-700 transition-all duration-200 font-gotham flex items-center"
+          >
+            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+            </svg>
+            Add Supply Batch
+          </button>
+          <button
+            onClick={() => {
+              setIsModalOpen(true);
+              setIsEditing(false);
+              setSelectedStock(null);
+            }}
+            className="px-4 py-2 bg-[#BE202E] text-white rounded-lg shadow-md hover:bg-opacity-90 transition-all duration-200 font-gotham"
+          >
+            Add New Stock
+          </button>
+        </div>
       </div>
 
       {/* Search Bar */}
@@ -976,8 +1184,7 @@ const StockManager = () => {
                           step="0.01"
                           {...register('baseCost', {
                             required: 'Base cost is required',
-                            min: { value: 0.01, message: 'Base cost must be greater than 0' },
-                            max: { value: 1000, message: 'Base cost seems too high' }
+                            min: { value: 0.01, message: 'Base cost must be greater than 0' }
                           })}
                           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#BE202E] focus:border-transparent"
                           placeholder="0.00"
@@ -995,8 +1202,7 @@ const StockManager = () => {
                           type="number"
                           step="0.01"
                           {...register('shippingCost', {
-                            min: { value: 0, message: 'Shipping cost must be non-negative' },
-                            max: { value: 100, message: 'Shipping cost seems too high' }
+                            min: { value: 0, message: 'Shipping cost must be non-negative' }
                           })}
                           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#BE202E] focus:border-transparent"
                           placeholder="0.00"
@@ -1014,8 +1220,7 @@ const StockManager = () => {
                           type="number"
                           step="0.01"
                           {...register('additionalCosts', {
-                            min: { value: 0, message: 'Additional costs must be non-negative' },
-                            max: { value: 100, message: 'Additional costs seem too high' }
+                            min: { value: 0, message: 'Additional costs must be non-negative' }
                           })}
                           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#BE202E] focus:border-transparent"
                           placeholder="0.00"
@@ -1468,8 +1673,7 @@ const StockManager = () => {
                           step="0.01"
                           {...registerSupply('baseCost', {
                             required: 'Base cost is required',
-                            min: { value: 0.01, message: 'Base cost must be greater than 0' },
-                            max: { value: 1000, message: 'Base cost seems too high' }
+                            min: { value: 0.01, message: 'Base cost must be greater than 0' }
                           })}
                           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#BE202E] focus:border-transparent"
                           placeholder="0.00"
@@ -1491,8 +1695,7 @@ const StockManager = () => {
                           type="number"
                           step="0.01"
                           {...registerSupply('shippingCost', {
-                            min: { value: 0, message: 'Shipping cost must be non-negative' },
-                            max: { value: 100, message: 'Shipping cost seems too high' }
+                            min: { value: 0, message: 'Shipping cost must be non-negative' }
                           })}
                           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#BE202E] focus:border-transparent"
                           placeholder="0.00"
@@ -1511,8 +1714,7 @@ const StockManager = () => {
                           type="number"
                           step="0.01"
                           {...registerSupply('additionalCosts', {
-                            min: { value: 0, message: 'Additional costs must be non-negative' },
-                            max: { value: 100, message: 'Additional costs seem too high' }
+                            min: { value: 0, message: 'Additional costs must be non-negative' }
                           })}
                           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#BE202E] focus:border-transparent"
                           placeholder="0.00"
@@ -1885,6 +2087,314 @@ const StockManager = () => {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Batch Modal */}
+      {isBulkBatchModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-7xl max-h-screen overflow-y-auto">
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-green-600 to-green-700">
+              <div className="flex justify-between items-center">
+                <h3 className="text-xl font-semibold text-white font-sansation">
+                  Add Supply Batch - Multiple Products
+                </h3>
+                <button
+                  onClick={() => {
+                    setIsBulkBatchModalOpen(false);
+                    setBulkBatchEntries([]);
+                    clearBulkBatchErrors();
+                    resetBulkBatch();
+                  }}
+                  className="text-white hover:text-gray-200 transition-colors"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <form onSubmit={handleSubmitBulkBatch(handleBulkBatchSubmit)} className="p-6">
+              {/* Batch Information */}
+              <div className="mb-6 bg-blue-50 rounded-lg p-4">
+                <h4 className="text-lg font-semibold text-blue-900 mb-4 flex items-center">
+                  <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 4a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1V8zm8 0a1 1 0 011-1h4a1 1 0 011 1v6a1 1 0 01-1 1h-4a1 1 0 01-1-1V8z" clipRule="evenodd"/>
+                  </svg>
+                  Batch Information
+                </h4>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Batch Number
+                    </label>
+                    <input
+                      {...registerBulkBatch('batchNumber')}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      placeholder="Auto-generated if empty"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Delivery Date
+                    </label>
+                    <input
+                      type="date"
+                      {...registerBulkBatch('deliveryDate')}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      max={new Date().toISOString().split('T')[0]}
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Origin/Source
+                    </label>
+                    <input
+                      {...registerBulkBatch('origin')}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      placeholder="Bauhinia Brewery"
+                      defaultValue="Bauhinia Brewery"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Shipping Method
+                    </label>
+                    <select
+                      {...registerBulkBatch('shippingMethod')}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    >
+                      <option value="">Select shipping method</option>
+                      <option value="Sea Freight">Sea Freight</option>
+                      <option value="Sea Freight + Refrigerated Truck">Sea Freight + Refrigerated Truck</option>
+                      <option value="Air Freight">Air Freight</option>
+                      <option value="Air Freight Express">Air Freight Express</option>
+                      <option value="Ground Transport">Ground Transport</option>
+                      <option value="Local Delivery">Local Delivery</option>
+                    </select>
+                  </div>
+                </div>
+                
+                <div className="mt-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    General Notes
+                  </label>
+                  <textarea
+                    {...registerBulkBatch('generalNotes')}
+                    rows={2}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    placeholder="General notes for this batch delivery"
+                  />
+                </div>
+              </div>
+
+              {/* Product Entries */}
+              <div className="mb-6">
+                <div className="flex justify-between items-center mb-4">
+                  <h4 className="text-lg font-semibold text-gray-900">Product Entries</h4>
+                  <button
+                    type="button"
+                    onClick={handleAddBulkEntry}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center"
+                  >
+                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                    </svg>
+                    Add Another Product
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  {bulkBatchEntries.map((entry, index) => (
+                    <div key={entry.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                      <div className="flex justify-between items-start mb-4">
+                        <h5 className="text-md font-medium text-gray-900">Product #{index + 1}</h5>
+                        {bulkBatchEntries.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveBulkEntry(entry.id)}
+                            className="text-red-600 hover:text-red-800 p-1"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Product *
+                          </label>
+                          <select
+                            value={entry.productId}
+                            onChange={(e) => {
+                              const selectedStock = stocks.find(s => s.id === e.target.value);
+                              handleUpdateBulkEntry(entry.id, 'productId', e.target.value);
+                              handleUpdateBulkEntry(entry.id, 'productName', selectedStock?.name || '');
+                            }}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                          >
+                            <option value="">Select product</option>
+                            {stocks.map(stock => (
+                              <option key={stock.id} value={stock.id}>
+                                {stock.name} ({stock.type}) - Current: {stock.quantity} units
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Quantity *
+                          </label>
+                          <input
+                            type="number"
+                            value={entry.quantity}
+                            onChange={(e) => handleUpdateBulkEntry(entry.id, 'quantity', safeNumber(e.target.value))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                            placeholder="0"
+                            min="1"
+                          />
+                        </div>
+                        
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Base Cost (₱) *
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={entry.baseCost}
+                            onChange={(e) => handleUpdateBulkEntry(entry.id, 'baseCost', safeNumber(e.target.value))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                            placeholder="0.00"
+                            min="0.01"
+                          />
+                        </div>
+                        
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Shipping Cost (₱)
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={entry.shippingCost}
+                            onChange={(e) => handleUpdateBulkEntry(entry.id, 'shippingCost', safeNumber(e.target.value))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                            placeholder="0.00"
+                            min="0"
+                          />
+                        </div>
+                        
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Additional Costs (₱)
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={entry.additionalCosts}
+                            onChange={(e) => handleUpdateBulkEntry(entry.id, 'additionalCosts', safeNumber(e.target.value))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                            placeholder="0.00"
+                            min="0"
+                          />
+                        </div>
+                        
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Supplier
+                          </label>
+                          <input
+                            value={entry.supplier}
+                            onChange={(e) => handleUpdateBulkEntry(entry.id, 'supplier', e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                            placeholder="Supplier name"
+                          />
+                        </div>
+                        
+                        <div className="md:col-span-2">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Product Notes
+                          </label>
+                          <input
+                            value={entry.notes}
+                            onChange={(e) => handleUpdateBulkEntry(entry.id, 'notes', e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                            placeholder="Specific notes for this product"
+                          />
+                        </div>
+                      </div>
+                      
+                      {/* Cost Summary for this entry */}
+                      {entry.quantity > 0 && entry.baseCost > 0 && (
+                        <div className="mt-4 p-3 bg-green-50 rounded-md border border-green-200">
+                          <div className="text-sm text-green-800">
+                            <strong>Total Cost per Unit:</strong> {formatPeso(calculateTotalCost(entry.baseCost, entry.shippingCost, entry.additionalCosts))} | 
+                            <strong> Total Investment:</strong> {formatPeso(entry.quantity * calculateTotalCost(entry.baseCost, entry.shippingCost, entry.additionalCosts))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Batch Summary */}
+              {bulkBatchEntries.some(entry => entry.quantity > 0 && entry.baseCost > 0) && (
+                <div className="mb-6 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                  <h4 className="text-lg font-semibold text-yellow-900 mb-3">Batch Summary</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                    <div>
+                      <span className="font-medium text-yellow-800">Products:</span> {bulkBatchEntries.filter(entry => entry.productId && entry.quantity > 0).length}
+                    </div>
+                    <div>
+                      <span className="font-medium text-yellow-800">Total Units:</span> {bulkBatchEntries.reduce((sum, entry) => sum + (entry.quantity || 0), 0)}
+                    </div>
+                    <div>
+                      <span className="font-medium text-yellow-800">Total Investment:</span> {formatPeso(bulkBatchEntries.reduce((sum, entry) => sum + (entry.quantity * calculateTotalCost(entry.baseCost, entry.shippingCost, entry.additionalCosts)), 0))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Form Actions */}
+              <div className="flex justify-between items-center pt-6 border-t border-gray-200">
+                <div className="text-sm text-gray-500">
+                  * Required fields
+                </div>
+                <div className="flex space-x-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsBulkBatchModalOpen(false);
+                      setBulkBatchEntries([]);
+                      clearBulkBatchErrors();
+                      resetBulkBatch();
+                    }}
+                    className="px-6 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium shadow-md"
+                  >
+                    Process Batch
+                  </button>
+                </div>
+              </div>
+            </form>
           </div>
         </div>
       )}
