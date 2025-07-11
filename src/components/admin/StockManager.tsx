@@ -70,6 +70,31 @@ interface BulkBatchFormData {
   entries: BulkSupplyEntry[];
 }
 
+interface BatchHistoryRecord {
+  id: string;
+  batchNumber: string;
+  deliveryDate: string;
+  processedDate: string;
+  origin?: string;
+  shippingMethod?: string;
+  generalNotes?: string;
+  totalProducts: number;
+  totalUnits: number;
+  totalInvestment: number;
+  products: Array<{
+    productId: string;
+    productName: string;
+    productType: string;
+    quantity: number;
+    baseCost: number;
+    shippingCost: number;
+    additionalCosts: number;
+    totalCost: number;
+    supplier: string;
+    notes?: string;
+  }>;
+}
+
 type SortField = 'name' | 'type' | 'quantity' | 'baseCost' | 'totalCost' | 'sellingPrice' | 'minimumStock';
 type SortOrder = 'asc' | 'desc';
 
@@ -96,6 +121,21 @@ const StockManager = () => {
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [isBulkBatchModalOpen, setIsBulkBatchModalOpen] = useState(false);
   const [bulkBatchEntries, setBulkBatchEntries] = useState<BulkSupplyEntry[]>([]);
+  const [batchHistory, setBatchHistory] = useState<BatchHistoryRecord[]>([]);
+  const [isBatchHistoryModalOpen, setIsBatchHistoryModalOpen] = useState(false);
+  const [dailyBatchCounters, setDailyBatchCounters] = useState<Record<string, number>>({});
+  const [currentBatchNumber, setCurrentBatchNumber] = useState<string>('');
+  
+  // Batch History Filter and Sort States
+  const [batchSearchTerm, setBatchSearchTerm] = useState('');
+  const [batchSortField, setBatchSortField] = useState<'processedDate' | 'deliveryDate' | 'batchNumber' | 'totalInvestment' | 'totalProducts' | 'totalUnits'>('processedDate');
+  const [batchSortDirection, setBatchSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [batchDateFilter, setBatchDateFilter] = useState<'all' | 'today' | 'week' | 'month' | 'custom'>('all');
+  const [batchDateFrom, setBatchDateFrom] = useState('');
+  const [batchDateTo, setBatchDateTo] = useState('');
+  const [batchCurrentPage, setBatchCurrentPage] = useState(1);
+  const [batchItemsPerPage] = useState(10);
+  const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set());
 
   const {
     register,
@@ -380,7 +420,7 @@ const StockManager = () => {
         priceLockChanged: false,
         // Enhanced batch tracking
         batchId,
-        batchNumber: data.batchNumber || `${selectedStock.name.substring(0, 3).toUpperCase()}-${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(selectedStock.supplyHistory.length + 1).padStart(3, '0')}`,
+        batchNumber: data.batchNumber || generateBatchNumber(),
         deliveryDate: data.deliveryDate,
         origin: data.origin,
         shippingMethod: data.shippingMethod,
@@ -554,10 +594,42 @@ const StockManager = () => {
   };
 
   // Bulk Batch Functions
+  const generateBatchNumber = (): string => {
+    const now = new Date();
+    const yymmdd = now.getFullYear().toString().slice(-2) + 
+                   String(now.getMonth() + 1).padStart(2, '0') + 
+                   String(now.getDate()).padStart(2, '0');
+    
+    const dateKey = yymmdd;
+    const currentCount = dailyBatchCounters[dateKey] || 0;
+    const nextCount = currentCount + 1;
+    
+    // Update the counter immediately
+    setDailyBatchCounters(prev => ({
+      ...prev,
+      [dateKey]: nextCount
+    }));
+    
+    const batchSequence = String(nextCount).padStart(3, '0');
+    return `BAU-${yymmdd}-${batchSequence}`;
+  };
+
   const handleOpenBulkBatch = () => {
+    const newBatchNumber = generateBatchNumber();
+    setCurrentBatchNumber(newBatchNumber);
     setBulkBatchEntries([createEmptyBulkEntry()]);
     setIsBulkBatchModalOpen(true);
     clearBulkBatchErrors();
+    
+    // Reset form with auto-generated batch number
+    resetBulkBatch({
+      batchNumber: newBatchNumber,
+      deliveryDate: '',
+      origin: 'Bauhinia Brewery',
+      shippingMethod: '',
+      generalNotes: '',
+      entries: [],
+    });
   };
 
   const createEmptyBulkEntry = (): BulkSupplyEntry => ({
@@ -584,6 +656,254 @@ const StockManager = () => {
     setBulkBatchEntries(prev => prev.map(entry => 
       entry.id === entryId ? { ...entry, [field]: value } : entry
     ));
+  };
+
+  const handleViewBatchHistory = () => {
+    setIsBatchHistoryModalOpen(true);
+    setBatchCurrentPage(1); // Reset to first page when opening
+  };
+
+  // Batch History Filtering and Sorting Functions
+  const getFilteredAndSortedBatchHistory = () => {
+    let filtered = [...batchHistory];
+
+    // Apply search filter
+    if (batchSearchTerm) {
+      filtered = filtered.filter(batch =>
+        batch.batchNumber.toLowerCase().includes(batchSearchTerm.toLowerCase()) ||
+        batch.origin?.toLowerCase().includes(batchSearchTerm.toLowerCase()) ||
+        batch.shippingMethod?.toLowerCase().includes(batchSearchTerm.toLowerCase()) ||
+        batch.generalNotes?.toLowerCase().includes(batchSearchTerm.toLowerCase()) ||
+        batch.products.some(product => 
+          product.productName.toLowerCase().includes(batchSearchTerm.toLowerCase()) ||
+          product.supplier.toLowerCase().includes(batchSearchTerm.toLowerCase())
+        )
+      );
+    }
+
+    // Apply date filter
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    
+    switch (batchDateFilter) {
+      case 'today':
+        filtered = filtered.filter(batch => {
+          const batchDate = new Date(batch.processedDate);
+          const batchDay = new Date(batchDate.getFullYear(), batchDate.getMonth(), batchDate.getDate());
+          return batchDay.getTime() === today.getTime();
+        });
+        break;
+      case 'week':
+        const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+        filtered = filtered.filter(batch => new Date(batch.processedDate) >= weekAgo);
+        break;
+      case 'month':
+        const monthAgo = new Date(today.getFullYear(), today.getMonth() - 1, today.getDate());
+        filtered = filtered.filter(batch => new Date(batch.processedDate) >= monthAgo);
+        break;
+      case 'custom':
+        if (batchDateFrom) {
+          filtered = filtered.filter(batch => new Date(batch.processedDate) >= new Date(batchDateFrom));
+        }
+        if (batchDateTo) {
+          filtered = filtered.filter(batch => new Date(batch.processedDate) <= new Date(batchDateTo + 'T23:59:59'));
+        }
+        break;
+    }
+
+    // Apply sorting
+    filtered.sort((a, b) => {
+      let aValue: any, bValue: any;
+      
+      switch (batchSortField) {
+        case 'processedDate':
+        case 'deliveryDate':
+          aValue = new Date(a[batchSortField]);
+          bValue = new Date(b[batchSortField]);
+          break;
+        case 'batchNumber':
+          aValue = a.batchNumber;
+          bValue = b.batchNumber;
+          break;
+        case 'totalInvestment':
+        case 'totalProducts':
+        case 'totalUnits':
+          aValue = a[batchSortField];
+          bValue = b[batchSortField];
+          break;
+        default:
+          return 0;
+      }
+
+      if (aValue < bValue) return batchSortDirection === 'asc' ? -1 : 1;
+      if (aValue > bValue) return batchSortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    return filtered;
+  };
+
+  const getBatchHistorySummary = () => {
+    const filtered = getFilteredAndSortedBatchHistory();
+    
+    return {
+      totalBatches: filtered.length,
+      totalProducts: filtered.reduce((sum, batch) => sum + batch.totalProducts, 0),
+      totalUnits: filtered.reduce((sum, batch) => sum + batch.totalUnits, 0),
+      totalInvestment: filtered.reduce((sum, batch) => sum + batch.totalInvestment, 0),
+      avgBatchSize: filtered.length > 0 ? filtered.reduce((sum, batch) => sum + batch.totalUnits, 0) / filtered.length : 0,
+      avgInvestment: filtered.length > 0 ? filtered.reduce((sum, batch) => sum + batch.totalInvestment, 0) / filtered.length : 0,
+      dateRange: {
+        earliest: filtered.length > 0 ? filtered.reduce((earliest, batch) => 
+          new Date(batch.processedDate) < new Date(earliest.processedDate) ? batch : earliest
+        ).processedDate : null,
+        latest: filtered.length > 0 ? filtered.reduce((latest, batch) => 
+          new Date(batch.processedDate) > new Date(latest.processedDate) ? batch : latest
+        ).processedDate : null
+      }
+    };
+  };
+
+  const getPaginatedBatchHistory = () => {
+    const filtered = getFilteredAndSortedBatchHistory();
+    const startIndex = (batchCurrentPage - 1) * batchItemsPerPage;
+    const endIndex = startIndex + batchItemsPerPage;
+    
+    return {
+      data: filtered.slice(startIndex, endIndex),
+      totalItems: filtered.length,
+      totalPages: Math.ceil(filtered.length / batchItemsPerPage),
+      currentPage: batchCurrentPage
+    };
+  };
+
+  const handleBatchSort = (field: typeof batchSortField) => {
+    if (batchSortField === field) {
+      setBatchSortDirection(batchSortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setBatchSortField(field);
+      setBatchSortDirection('desc');
+    }
+    setBatchCurrentPage(1);
+  };
+
+  const clearBatchFilters = () => {
+    setBatchSearchTerm('');
+    setBatchDateFilter('all');
+    setBatchDateFrom('');
+    setBatchDateTo('');
+    setBatchSortField('processedDate');
+    setBatchSortDirection('desc');
+    setBatchCurrentPage(1);
+  };
+
+  const toggleBatchExpansion = (batchId: string) => {
+    setExpandedBatches(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(batchId)) {
+        newSet.delete(batchId);
+      } else {
+        newSet.add(batchId);
+      }
+      return newSet;
+    });
+  };
+
+  const handleExportBatchHistory = () => {
+    try {
+      const filtered = getFilteredAndSortedBatchHistory();
+      const summary = getBatchHistorySummary();
+      
+      if (filtered.length === 0) {
+        showToast.warning('No batch history available to export');
+        return;
+      }
+
+      const csvHeaders = [
+        'Batch ID',
+        'Batch Number', 
+        'Delivery Date',
+        'Processed Date',
+        'Origin',
+        'Shipping Method',
+        'Total Products',
+        'Total Units',
+        'Total Investment',
+        'Average Cost Per Unit',
+        'Product Name',
+        'Product Type',
+        'Quantity',
+        'Base Cost',
+        'Shipping Cost',
+        'Additional Costs',
+        'Total Cost',
+        'Supplier',
+        'Product Notes',
+        'General Notes'
+      ];
+
+      const csvRows: string[][] = [];
+      
+      filtered.forEach(batch => {
+        const avgCostPerUnit = batch.totalUnits > 0 ? batch.totalInvestment / batch.totalUnits : 0;
+        
+        batch.products.forEach((product, index) => {
+          csvRows.push([
+            batch.id,
+            batch.batchNumber,
+            batch.deliveryDate || '',
+            batch.processedDate,
+            batch.origin || '',
+            batch.shippingMethod || '',
+            index === 0 ? batch.totalProducts.toString() : '',
+            index === 0 ? batch.totalUnits.toString() : '',
+            index === 0 ? formatPeso(batch.totalInvestment) : '',
+            index === 0 ? formatPeso(avgCostPerUnit) : '',
+            product.productName,
+            product.productType,
+            product.quantity.toString(),
+            formatPeso(product.baseCost),
+            formatPeso(product.shippingCost),
+            formatPeso(product.additionalCosts),
+            formatPeso(product.totalCost),
+            product.supplier,
+            product.notes || '',
+            index === 0 ? (batch.generalNotes || '') : ''
+          ]);
+        });
+      });
+
+      // Add summary section
+      const summaryRows: string[][] = [
+        [''],
+        ['BATCH HISTORY SUMMARY'],
+        ['Total Batches', summary.totalBatches.toString()],
+        ['Total Products Delivered', summary.totalProducts.toString()],
+        ['Total Units Delivered', summary.totalUnits.toString()],
+        ['Total Investment', formatPeso(summary.totalInvestment)],
+        ['Average Batch Size', Math.round(summary.avgBatchSize).toString()],
+        ['Average Investment per Batch', formatPeso(summary.avgInvestment)],
+        ['Date Range', summary.dateRange.earliest && summary.dateRange.latest ? 
+          `${new Date(summary.dateRange.earliest).toLocaleDateString()} - ${new Date(summary.dateRange.latest).toLocaleDateString()}` : 
+          'No data'
+        ],
+        ['Export Date', new Date().toLocaleDateString()],
+        ['Search Filter', batchSearchTerm || 'None'],
+        ['Date Filter', batchDateFilter],
+        ['Sort Field', batchSortField],
+        ['Sort Direction', batchSortDirection]
+      ];
+
+      const csvContent = arrayToCSV([csvHeaders, ...csvRows, ...summaryRows]);
+      const filterSuffix = batchSearchTerm || batchDateFilter !== 'all' ? '-filtered' : '';
+      const filename = `batch-history${filterSuffix}-${new Date().toISOString().split('T')[0]}.csv`;
+      
+      downloadCSV(csvContent, filename);
+      showToast.success(`Batch history exported successfully (${filtered.length} records)`);
+    } catch (error) {
+      console.error('Error exporting batch history:', error);
+      showToast.error('Failed to export batch history. Please try again.');
+    }
   };
 
   const handleBulkBatchSubmit = async (data: BulkBatchFormData) => {
@@ -652,7 +972,7 @@ const StockManager = () => {
           priceLockChanged: false,
           // Enhanced batch tracking
           batchId: `${batchId}-${bulkEntry.productName.substring(0, 3).toUpperCase()}`,
-          batchNumber: data.batchNumber || `BULK-${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(currentDate.getDate()).padStart(2, '0')}`,
+          batchNumber: data.batchNumber || currentBatchNumber,
           deliveryDate: data.deliveryDate,
           origin: data.origin,
           shippingMethod: data.shippingMethod,
@@ -693,6 +1013,34 @@ const StockManager = () => {
       const totalProducts = processedEntries.length;
       const totalInvestment = processedEntries.reduce((sum, {entry}) => sum + (entry.quantity * entry.totalCost), 0);
 
+      // Record batch history
+      const batchHistoryRecord: BatchHistoryRecord = {
+        id: batchId,
+        batchNumber: data.batchNumber || currentBatchNumber,
+        deliveryDate: data.deliveryDate || '',
+        processedDate: currentDate.toISOString(),
+        origin: data.origin,
+        shippingMethod: data.shippingMethod,
+        generalNotes: data.generalNotes,
+        totalProducts,
+        totalUnits,
+        totalInvestment,
+        products: processedEntries.map(({stock, entry}) => ({
+          productId: stock.id,
+          productName: stock.name,
+          productType: stock.type,
+          quantity: entry.quantity,
+          baseCost: entry.baseCost,
+          shippingCost: entry.shippingCost,
+          additionalCosts: entry.additionalCosts,
+          totalCost: entry.totalCost,
+          supplier: entry.supplier || '',
+          notes: entry.notes
+        }))
+      };
+
+      setBatchHistory(prev => [batchHistoryRecord, ...prev]);
+
       showToast.update(
         loadingToastId, 
         `Successfully processed bulk batch: ${totalProducts} products, ${totalUnits} total units, ${formatPeso(totalInvestment)} investment`, 
@@ -701,6 +1049,7 @@ const StockManager = () => {
 
       setIsBulkBatchModalOpen(false);
       setBulkBatchEntries([]);
+      setCurrentBatchNumber('');
       clearBulkBatchErrors();
       resetBulkBatch();
     } catch (error) {
@@ -936,6 +1285,15 @@ const StockManager = () => {
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-gray-900 font-sansation">Stock Management</h2>
         <div className="flex space-x-3">
+          <button
+            onClick={handleViewBatchHistory}
+            className="px-4 py-2 bg-purple-600 text-white rounded-lg shadow-md hover:bg-purple-700 transition-all duration-200 font-gotham flex items-center"
+          >
+            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            Batch History
+          </button>
           <button
             onClick={handleOpenBulkBatch}
             className="px-4 py-2 bg-green-600 text-white rounded-lg shadow-md hover:bg-green-700 transition-all duration-200 font-gotham flex items-center"
@@ -2105,6 +2463,7 @@ const StockManager = () => {
                   onClick={() => {
                     setIsBulkBatchModalOpen(false);
                     setBulkBatchEntries([]);
+                    setCurrentBatchNumber('');
                     clearBulkBatchErrors();
                     resetBulkBatch();
                   }}
@@ -2135,8 +2494,11 @@ const StockManager = () => {
                     <input
                       {...registerBulkBatch('batchNumber')}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                      placeholder="Auto-generated if empty"
+                      placeholder="BAU-YYMMDD-XXX format"
                     />
+                    <p className="mt-1 text-xs text-gray-500">
+                      Format: BAU-{new Date().getFullYear().toString().slice(-2)}{String(new Date().getMonth() + 1).padStart(2, '0')}{String(new Date().getDate()).padStart(2, '0')}-XXX (auto-generated)
+                    </p>
                   </div>
                   
                   <div>
@@ -2242,14 +2604,23 @@ const StockManager = () => {
                               handleUpdateBulkEntry(entry.id, 'productName', selectedStock?.name || '');
                             }}
                             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                            disabled={isLoading}
                           >
-                            <option value="">Select product</option>
-                            {stocks.map(stock => (
+                            <option value="">
+                              {isLoading ? 'Loading products...' : 'Select product from current inventory'}
+                            </option>
+                            {!isLoading && stocks.map(stock => (
                               <option key={stock.id} value={stock.id}>
-                                {stock.name} ({stock.type}) - Current: {stock.quantity} units
+                                {stock.name} ({stock.type}) - Current Stock: {stock.quantity} units
                               </option>
                             ))}
                           </select>
+                          {!isLoading && stocks.length === 0 && (
+                            <p className="mt-1 text-sm text-amber-600">No products available in inventory</p>
+                          )}
+                          {isLoading && (
+                            <p className="mt-1 text-sm text-gray-500">Loading inventory data...</p>
+                          )}
                         </div>
                         
                         <div>
@@ -2379,6 +2750,7 @@ const StockManager = () => {
                     onClick={() => {
                       setIsBulkBatchModalOpen(false);
                       setBulkBatchEntries([]);
+                      setCurrentBatchNumber('');
                       clearBulkBatchErrors();
                       resetBulkBatch();
                     }}
@@ -2398,6 +2770,435 @@ const StockManager = () => {
           </div>
         </div>
       )}
+
+      {/* Enhanced Batch History Modal */}
+      {isBatchHistoryModalOpen && (() => {
+        const paginatedData = getPaginatedBatchHistory();
+        const summary = getBatchHistorySummary();
+        
+        return (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-7xl max-h-screen overflow-y-auto">
+              {/* Modal Header */}
+              <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-purple-600 to-purple-700">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h3 className="text-xl font-semibold text-white font-sansation">
+                      Batch History - Bulk Supply Deliveries
+                    </h3>
+                    <p className="text-purple-100 text-sm mt-1">
+                      Comprehensive tracking of all batch deliveries
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setIsBatchHistoryModalOpen(false)}
+                    className="text-white hover:text-gray-200 transition-colors"
+                  >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              {/* Modal Content */}
+              <div className="p-6">
+                {batchHistory.length > 0 ? (
+                  <>
+                    {/* Summary Cards */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-6">
+                      <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                        <div className="text-sm font-medium text-blue-900">Total Batches</div>
+                        <div className="text-2xl font-bold text-blue-700">{summary.totalBatches}</div>
+                      </div>
+                      <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                        <div className="text-sm font-medium text-green-900">Total Products</div>
+                        <div className="text-2xl font-bold text-green-700">{summary.totalProducts}</div>
+                      </div>
+                      <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                        <div className="text-sm font-medium text-purple-900">Total Units</div>
+                        <div className="text-2xl font-bold text-purple-700">{summary.totalUnits}</div>
+                      </div>
+                      <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+                        <div className="text-sm font-medium text-yellow-900">Total Investment</div>
+                        <div className="text-lg font-bold text-yellow-700">{formatPeso(summary.totalInvestment)}</div>
+                      </div>
+                      <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-200">
+                        <div className="text-sm font-medium text-indigo-900">Avg Batch Size</div>
+                        <div className="text-2xl font-bold text-indigo-700">{Math.round(summary.avgBatchSize)}</div>
+                      </div>
+                      <div className="bg-pink-50 p-4 rounded-lg border border-pink-200">
+                        <div className="text-sm font-medium text-pink-900">Avg Investment</div>
+                        <div className="text-lg font-bold text-pink-700">{formatPeso(summary.avgInvestment)}</div>
+                      </div>
+                    </div>
+
+                    {/* Filters and Search */}
+                    <div className="bg-gray-50 p-4 rounded-lg mb-6 border border-gray-200">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        {/* Search */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Search
+                          </label>
+                          <input
+                            type="text"
+                            value={batchSearchTerm}
+                            onChange={(e) => setBatchSearchTerm(e.target.value)}
+                            placeholder="Search batch, product, supplier..."
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+                          />
+                        </div>
+
+                        {/* Date Filter */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Date Filter
+                          </label>
+                          <select
+                            value={batchDateFilter}
+                            onChange={(e) => setBatchDateFilter(e.target.value as any)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+                          >
+                            <option value="all">All Time</option>
+                            <option value="today">Today</option>
+                            <option value="week">Last 7 Days</option>
+                            <option value="month">Last 30 Days</option>
+                            <option value="custom">Custom Range</option>
+                          </select>
+                        </div>
+
+                        {/* Custom Date Range */}
+                        {batchDateFilter === 'custom' && (
+                          <>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                From Date
+                              </label>
+                              <input
+                                type="date"
+                                value={batchDateFrom}
+                                onChange={(e) => setBatchDateFrom(e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                To Date
+                              </label>
+                              <input
+                                type="date"
+                                value={batchDateTo}
+                                onChange={(e) => setBatchDateTo(e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+                              />
+                            </div>
+                          </>
+                        )}
+
+                        {/* Clear Filters */}
+                        <div className="flex items-end">
+                          <button
+                            onClick={clearBatchFilters}
+                            className="w-full px-3 py-2 text-sm bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition-colors"
+                          >
+                            Clear Filters
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Sort Options */}
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      <span className="text-sm font-medium text-gray-700 self-center">Sort by:</span>
+                      {[
+                        { field: 'processedDate' as const, label: 'Processed Date' },
+                        { field: 'deliveryDate' as const, label: 'Delivery Date' },
+                        { field: 'batchNumber' as const, label: 'Batch Number' },
+                        { field: 'totalInvestment' as const, label: 'Investment' },
+                        { field: 'totalProducts' as const, label: 'Products' },
+                        { field: 'totalUnits' as const, label: 'Units' }
+                      ].map(({ field, label }) => (
+                        <button
+                          key={field}
+                          onClick={() => handleBatchSort(field)}
+                          className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                            batchSortField === field
+                              ? 'bg-purple-600 text-white'
+                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          }`}
+                        >
+                          {label}
+                          {batchSortField === field && (
+                            <span className="ml-1">
+                              {batchSortDirection === 'asc' ? '↑' : '↓'}
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Bulk Expand/Collapse Controls */}
+                    <div className="flex justify-between items-center mb-4">
+                      <div className="text-sm text-gray-600">
+                        {paginatedData.data.length} batch{paginatedData.data.length !== 1 ? 'es' : ''} on this page
+                      </div>
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={() => {
+                            const allBatchIds = paginatedData.data.map(batch => batch.id);
+                            setExpandedBatches(new Set(allBatchIds));
+                          }}
+                          className="px-3 py-1 text-sm bg-purple-100 text-purple-700 rounded-md hover:bg-purple-200 transition-colors"
+                        >
+                          Expand All
+                        </button>
+                        <button
+                          onClick={() => setExpandedBatches(new Set())}
+                          className="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+                        >
+                          Collapse All
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Collapsible Batch List */}
+                    <div className="space-y-4">
+                      {paginatedData.data.map((batch) => {
+                        const isExpanded = expandedBatches.has(batch.id);
+                        
+                        return (
+                          <div key={batch.id} className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+                            {/* Compact Header - Always Visible */}
+                            <div 
+                              className="px-6 py-4 cursor-pointer hover:bg-gray-50 transition-colors"
+                              onClick={() => toggleBatchExpansion(batch.id)}
+                            >
+                              <div className="flex justify-between items-center">
+                                <div className="flex-1">
+                                  <div className="flex items-center space-x-4">
+                                    {/* Expand/Collapse Icon */}
+                                    <div className="flex-shrink-0">
+                                      <svg 
+                                        className={`w-5 h-5 text-gray-400 transform transition-transform duration-200 ${
+                                          isExpanded ? 'rotate-90' : ''
+                                        }`} 
+                                        fill="none" 
+                                        stroke="currentColor" 
+                                        viewBox="0 0 24 24"
+                                      >
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                      </svg>
+                                    </div>
+                                    
+                                    {/* Batch Info */}
+                                    <div className="flex-1 min-w-0">
+                                      <h4 className="text-lg font-semibold text-gray-900 truncate">
+                                        {batch.batchNumber}
+                                      </h4>
+                                      <div className="flex items-center space-x-6 text-sm text-gray-600 mt-1">
+                                        <span>
+                                          <span className="font-medium">Delivered:</span> {batch.deliveryDate ? new Date(batch.deliveryDate).toLocaleDateString() : 'Not specified'}
+                                        </span>
+                                        <span>
+                                          <span className="font-medium">Processed:</span> {new Date(batch.processedDate).toLocaleDateString()}
+                                        </span>
+                                        <span>
+                                          <span className="font-medium">Origin:</span> {batch.origin || 'Not specified'}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                                
+                                {/* Quick Stats */}
+                                <div className="flex items-center space-x-6 text-sm">
+                                  <div className="text-center">
+                                    <div className="font-semibold text-blue-600">{batch.totalProducts}</div>
+                                    <div className="text-gray-500">Products</div>
+                                  </div>
+                                  <div className="text-center">
+                                    <div className="font-semibold text-purple-600">{batch.totalUnits}</div>
+                                    <div className="text-gray-500">Units</div>
+                                  </div>
+                                  <div className="text-center">
+                                    <div className="font-semibold text-green-600">{formatPeso(batch.totalInvestment)}</div>
+                                    <div className="text-gray-500">Investment</div>
+                                  </div>
+                                  <div className="text-center">
+                                    <div className="font-semibold text-orange-600">{formatPeso(batch.totalInvestment / batch.totalUnits)}</div>
+                                    <div className="text-gray-500">Avg/Unit</div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Expanded Details - Conditionally Visible */}
+                            {isExpanded && (
+                              <div className="border-t border-gray-200 bg-gray-50">
+                                <div className="px-6 py-4">
+                                  {/* Detailed Information */}
+                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4 text-sm">
+                                    <div>
+                                      <span className="font-medium text-gray-700">Shipping Method:</span><br />
+                                      <span className="text-gray-600">{batch.shippingMethod || 'Not specified'}</span>
+                                    </div>
+                                    <div>
+                                      <span className="font-medium text-gray-700">Batch ID:</span><br />
+                                      <span className="text-gray-600 font-mono text-xs">{batch.id}</span>
+                                    </div>
+                                    <div>
+                                      <span className="font-medium text-gray-700">Processing Time:</span><br />
+                                      <span className="text-gray-600">{new Date(batch.processedDate).toLocaleString()}</span>
+                                    </div>
+                                    <div>
+                                      <span className="font-medium text-gray-700">Products/Units Ratio:</span><br />
+                                      <span className="text-gray-600">{(batch.totalUnits / batch.totalProducts).toFixed(1)} units/product</span>
+                                    </div>
+                                  </div>
+
+                                  {/* General Notes */}
+                                  {batch.generalNotes && (
+                                    <div className="mb-4 p-3 bg-blue-50 rounded border border-blue-200">
+                                      <div className="text-sm">
+                                        <span className="font-medium text-blue-900">Batch Notes:</span>
+                                        <span className="text-blue-700 ml-2">{batch.generalNotes}</span>
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Products Table */}
+                                  <div className="overflow-x-auto">
+                                    <table className="min-w-full bg-white rounded border border-gray-200">
+                                      <thead className="bg-gray-100">
+                                        <tr>
+                                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
+                                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
+                                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Base Cost</th>
+                                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Shipping</th>
+                                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Additional</th>
+                                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Cost</th>
+                                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Investment</th>
+                                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Supplier</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-gray-200">
+                                        {batch.products.map((product, index) => (
+                                          <tr key={index} className="hover:bg-gray-50">
+                                            <td className="px-4 py-2">
+                                              <div>
+                                                <div className="font-medium text-gray-900">{product.productName}</div>
+                                                <div className="text-sm text-gray-500">{product.productType}</div>
+                                                {product.notes && (
+                                                  <div className="text-xs text-gray-400 mt-1">{product.notes}</div>
+                                                )}
+                                              </div>
+                                            </td>
+                                            <td className="px-4 py-2 text-gray-900">{product.quantity}</td>
+                                            <td className="px-4 py-2 text-gray-900">{formatPeso(product.baseCost)}</td>
+                                            <td className="px-4 py-2 text-gray-900">{formatPeso(product.shippingCost)}</td>
+                                            <td className="px-4 py-2 text-gray-900">{formatPeso(product.additionalCosts)}</td>
+                                            <td className="px-4 py-2 font-medium text-gray-900">{formatPeso(product.totalCost)}</td>
+                                            <td className="px-4 py-2 font-medium text-green-600">{formatPeso(product.quantity * product.totalCost)}</td>
+                                            <td className="px-4 py-2 text-gray-900">{product.supplier}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Pagination */}
+                    {paginatedData.totalPages > 1 && (
+                      <div className="flex justify-between items-center mt-6 pt-4 border-t border-gray-200">
+                        <div className="text-sm text-gray-600">
+                          Showing {((paginatedData.currentPage - 1) * batchItemsPerPage) + 1} to {Math.min(paginatedData.currentPage * batchItemsPerPage, paginatedData.totalItems)} of {paginatedData.totalItems} results
+                        </div>
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={() => setBatchCurrentPage(Math.max(1, batchCurrentPage - 1))}
+                            disabled={batchCurrentPage === 1}
+                            className="px-3 py-2 text-sm bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            Previous
+                          </button>
+                          <span className="px-3 py-2 text-sm text-gray-700">
+                            Page {batchCurrentPage} of {paginatedData.totalPages}
+                          </span>
+                          <button
+                            onClick={() => setBatchCurrentPage(Math.min(paginatedData.totalPages, batchCurrentPage + 1))}
+                            disabled={batchCurrentPage === paginatedData.totalPages}
+                            className="px-3 py-2 text-sm bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            Next
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="text-center py-12">
+                    <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <h3 className="mt-2 text-sm font-medium text-gray-900">No batch history</h3>
+                    <p className="mt-1 text-sm text-gray-500">No bulk batch deliveries have been processed yet.</p>
+                    <div className="mt-6">
+                      <button
+                        onClick={() => {
+                          setIsBatchHistoryModalOpen(false);
+                          handleOpenBulkBatch();
+                        }}
+                        className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 transition-colors"
+                      >
+                        <svg className="-ml-1 mr-2 h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd"/>
+                        </svg>
+                        Process First Batch
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex justify-between items-center mt-6 pt-6 border-t border-gray-200">
+                  <div className="text-sm text-gray-500">
+                    {paginatedData.totalItems > 0 
+                      ? `${paginatedData.totalItems} batch record${paginatedData.totalItems !== 1 ? 's' : ''} found`
+                      : 'No records found'
+                    }
+                  </div>
+                  <div className="flex space-x-3">
+                    {batchHistory.length > 0 && (
+                      <button
+                        onClick={handleExportBatchHistory}
+                        className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+                      >
+                        <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        Export CSV
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setIsBatchHistoryModalOpen(false)}
+                      className="px-6 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };
