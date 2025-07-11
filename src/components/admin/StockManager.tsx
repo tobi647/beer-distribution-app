@@ -138,8 +138,6 @@ const StockManager = () => {
   const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set());
   const [isCalendarPopupOpen, setIsCalendarPopupOpen] = useState(false);
   const [calendarCurrentMonth, setCalendarCurrentMonth] = useState(new Date());
-  const [calendarSelectingRange, setCalendarSelectingRange] = useState(false);
-  const [calendarHoverDate, setCalendarHoverDate] = useState<string>('');
 
   const {
     register,
@@ -281,7 +279,8 @@ const StockManager = () => {
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
-      if (isCalendarPopupOpen && !target.closest('.calendar-popup-container')) {
+      // Close if clicking on the backdrop (black overlay)
+      if (isCalendarPopupOpen && target.classList.contains('bg-black')) {
         setIsCalendarPopupOpen(false);
       }
     };
@@ -289,6 +288,29 @@ const StockManager = () => {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isCalendarPopupOpen]);
+
+  // Prevent body scrolling when modals are open
+  useEffect(() => {
+    const modalCount = [
+      isModalOpen, 
+      isAddSupplyModalOpen, 
+      isHistoryModalOpen, 
+      isBulkBatchModalOpen, 
+      isBatchHistoryModalOpen, 
+      isCalendarPopupOpen
+    ].filter(Boolean).length;
+
+    if (modalCount > 0) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+
+    // Cleanup on unmount
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [isModalOpen, isAddSupplyModalOpen, isHistoryModalOpen, isBulkBatchModalOpen, isBatchHistoryModalOpen, isCalendarPopupOpen]);
 
   const handleEdit = (stock: Required<BeerStock>) => {
     setSelectedStock(stock);
@@ -856,7 +878,6 @@ const StockManager = () => {
       // Start new selection
       setBatchDateFrom(dateStr);
       setBatchDateTo('');
-      setCalendarSelectingRange(true);
     } else if (batchDateFrom && !batchDateTo) {
       // Complete selection
       const startDate = new Date(batchDateFrom);
@@ -868,7 +889,6 @@ const StockManager = () => {
         setBatchDateFrom(dateStr);
         setBatchDateTo(batchDateFrom);
       }
-      setCalendarSelectingRange(false);
     }
   };
 
@@ -928,7 +948,6 @@ const StockManager = () => {
     const fromDate = new Date(today.getTime() - (days - 1) * 24 * 60 * 60 * 1000);
     setBatchDateFrom(formatDateForInput(fromDate));
     setBatchDateTo(formatDateForInput(today));
-    setCalendarSelectingRange(false);
   };
 
   const handleExportBatchHistory = () => {
@@ -3004,9 +3023,10 @@ const StockManager = () => {
                               </svg>
                             </div>
 
-                            {/* Calendar Popup */}
+                            {/* Calendar Popup - Fixed Positioning */}
                             {isCalendarPopupOpen && batchDateFilter === 'custom' && (
-                              <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-lg shadow-xl border border-gray-200 z-50 p-4 min-w-80">
+                              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                                <div className="bg-white rounded-lg shadow-xl border border-gray-200 p-6 w-96 max-w-lg mx-4 max-h-screen overflow-y-auto">
                                 {/* Calendar Header */}
                                 <div className="flex items-center justify-between mb-4">
                                   <button
@@ -3054,7 +3074,6 @@ const StockManager = () => {
                                       <button
                                         key={index}
                                         onClick={() => isCurrentMonth && handleCalendarDateClick(dateStr)}
-                                        onMouseEnter={() => setCalendarHoverDate(dateStr)}
                                         disabled={!isCurrentMonth}
                                         className={`
                                           p-2 text-sm rounded-md transition-all duration-150 relative
@@ -3108,24 +3127,31 @@ const StockManager = () => {
                                         <span className="ml-2">
                                           {new Date(batchDateFrom).toLocaleDateString()} - {new Date(batchDateTo).toLocaleDateString()}
                                         </span>
-                                                                                 <span className="ml-2 text-blue-600">
-                                           ({Math.ceil((new Date(batchDateTo).getTime() - new Date(batchDateFrom).getTime()) / (1000 * 60 * 60 * 24 * 1000)) + 1} days)
-                                         </span>
+                                                                                                                       <span className="ml-2 text-blue-600">
+                                        ({Math.ceil((new Date(batchDateTo).getTime() - new Date(batchDateFrom).getTime()) / (1000 * 60 * 60 * 24)) + 1} days)
+                                      </span>
                                       </div>
                                     </div>
                                   </div>
                                 )}
 
-                                {/* Close Button */}
-                                <div className="flex justify-end mt-4">
+                                {/* Action Buttons */}
+                                <div className="flex justify-end space-x-3 mt-6">
                                   <button
                                     onClick={() => setIsCalendarPopupOpen(false)}
-                                    className="px-4 py-2 bg-purple-600 text-white text-sm rounded-md hover:bg-purple-700 transition-colors"
+                                    className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    onClick={() => setIsCalendarPopupOpen(false)}
+                                    className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors"
                                   >
                                     Apply Filter
                                   </button>
                                 </div>
                               </div>
+                            </div>
                             )}
                           </div>
                         </div>
