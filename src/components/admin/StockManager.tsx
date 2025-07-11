@@ -136,6 +136,10 @@ const StockManager = () => {
   const [batchCurrentPage, setBatchCurrentPage] = useState(1);
   const [batchItemsPerPage] = useState(10);
   const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set());
+  const [isCalendarPopupOpen, setIsCalendarPopupOpen] = useState(false);
+  const [calendarCurrentMonth, setCalendarCurrentMonth] = useState(new Date());
+  const [calendarSelectingRange, setCalendarSelectingRange] = useState(false);
+  const [calendarHoverDate, setCalendarHoverDate] = useState<string>('');
 
   const {
     register,
@@ -272,6 +276,19 @@ const StockManager = () => {
       setValue('sellingPrice', roundToDecimal(calculatedSellingPrice));
     }
   }, [calculatedSellingPrice, formValues.isPriceLocked, isModalOpen, setValue]);
+
+  // Close calendar popup when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (isCalendarPopupOpen && !target.closest('.calendar-popup-container')) {
+        setIsCalendarPopupOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isCalendarPopupOpen]);
 
   const handleEdit = (stock: Required<BeerStock>) => {
     setSelectedStock(stock);
@@ -807,6 +824,111 @@ const StockManager = () => {
       }
       return newSet;
     });
+  };
+
+  // Calendar utility functions
+  const getDaysInMonth = (date: Date) => {
+    return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  };
+
+  const getFirstDayOfMonth = (date: Date) => {
+    return new Date(date.getFullYear(), date.getMonth(), 1).getDay();
+  };
+
+  const formatDateForInput = (date: Date) => {
+    return date.toISOString().split('T')[0];
+  };
+
+  const isDateInRange = (date: string, start: string, end: string) => {
+    if (!start || !end) return false;
+    const checkDate = new Date(date);
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    return checkDate >= startDate && checkDate <= endDate;
+  };
+
+  const isDateSelected = (date: string) => {
+    return date === batchDateFrom || date === batchDateTo;
+  };
+
+  const handleCalendarDateClick = (dateStr: string) => {
+    if (!batchDateFrom || (batchDateFrom && batchDateTo)) {
+      // Start new selection
+      setBatchDateFrom(dateStr);
+      setBatchDateTo('');
+      setCalendarSelectingRange(true);
+    } else if (batchDateFrom && !batchDateTo) {
+      // Complete selection
+      const startDate = new Date(batchDateFrom);
+      const endDate = new Date(dateStr);
+      
+      if (endDate >= startDate) {
+        setBatchDateTo(dateStr);
+      } else {
+        setBatchDateFrom(dateStr);
+        setBatchDateTo(batchDateFrom);
+      }
+      setCalendarSelectingRange(false);
+    }
+  };
+
+  const getCalendarDates = () => {
+    const year = calendarCurrentMonth.getFullYear();
+    const month = calendarCurrentMonth.getMonth();
+    const daysInMonth = getDaysInMonth(calendarCurrentMonth);
+    const firstDay = getFirstDayOfMonth(calendarCurrentMonth);
+    
+    const dates = [];
+    
+    // Previous month dates
+    const prevMonth = new Date(year, month - 1, 0);
+    for (let i = firstDay - 1; i >= 0; i--) {
+      const day = prevMonth.getDate() - i;
+      dates.push({
+        date: new Date(prevMonth.getFullYear(), prevMonth.getMonth(), day),
+        isCurrentMonth: false
+      });
+    }
+    
+    // Current month dates
+    for (let day = 1; day <= daysInMonth; day++) {
+      dates.push({
+        date: new Date(year, month, day),
+        isCurrentMonth: true
+      });
+    }
+    
+    // Next month dates to fill grid
+    const totalCells = Math.ceil((firstDay + daysInMonth) / 7) * 7;
+    const remainingCells = totalCells - (firstDay + daysInMonth);
+    for (let day = 1; day <= remainingCells; day++) {
+      dates.push({
+        date: new Date(year, month + 1, day),
+        isCurrentMonth: false
+      });
+    }
+    
+    return dates;
+  };
+
+  const navigateMonth = (direction: 'prev' | 'next') => {
+    setCalendarCurrentMonth(prev => {
+      const newMonth = new Date(prev);
+      if (direction === 'prev') {
+        newMonth.setMonth(prev.getMonth() - 1);
+      } else {
+        newMonth.setMonth(prev.getMonth() + 1);
+      }
+      return newMonth;
+    });
+  };
+
+  const setQuickDateRange = (days: number) => {
+    const today = new Date();
+    const fromDate = new Date(today.getTime() - (days - 1) * 24 * 60 * 60 * 1000);
+    setBatchDateFrom(formatDateForInput(fromDate));
+    setBatchDateTo(formatDateForInput(today));
+    setCalendarSelectingRange(false);
   };
 
   const handleExportBatchHistory = () => {
@@ -2833,9 +2955,9 @@ const StockManager = () => {
                       </div>
                     </div>
 
-                    {/* Filters and Search */}
+                    {/* Enhanced Filters and Search */}
                     <div className="bg-gray-50 p-4 rounded-lg mb-6 border border-gray-200">
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {/* Search */}
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -2850,51 +2972,163 @@ const StockManager = () => {
                           />
                         </div>
 
-                        {/* Date Filter */}
-                        <div>
+                        {/* Enhanced Date Filter with Calendar Popup */}
+                        <div className="calendar-popup-container">
                           <label className="block text-sm font-medium text-gray-700 mb-1">
                             Date Filter
                           </label>
-                          <select
-                            value={batchDateFilter}
-                            onChange={(e) => setBatchDateFilter(e.target.value as any)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
-                          >
-                            <option value="all">All Time</option>
-                            <option value="today">Today</option>
-                            <option value="week">Last 7 Days</option>
-                            <option value="month">Last 30 Days</option>
-                            <option value="custom">Custom Range</option>
-                          </select>
-                        </div>
+                          <div className="relative">
+                            <select
+                              value={batchDateFilter}
+                              onChange={(e) => {
+                                setBatchDateFilter(e.target.value as any);
+                                if (e.target.value === 'custom') {
+                                  setIsCalendarPopupOpen(true);
+                                } else {
+                                  setIsCalendarPopupOpen(false);
+                                }
+                              }}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm appearance-none cursor-pointer"
+                            >
+                              <option value="all">📊 All Time</option>
+                              <option value="today">📅 Today</option>
+                              <option value="week">📈 Last 7 Days</option>
+                              <option value="month">📉 Last 30 Days</option>
+                              <option value="custom">🗓️ Custom Date Range</option>
+                            </select>
+                            
+                            {/* Calendar Icon */}
+                            <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
+                              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                              </svg>
+                            </div>
 
-                        {/* Custom Date Range */}
-                        {batchDateFilter === 'custom' && (
-                          <>
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-1">
-                                From Date
-                              </label>
-                              <input
-                                type="date"
-                                value={batchDateFrom}
-                                onChange={(e) => setBatchDateFrom(e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-1">
-                                To Date
-                              </label>
-                              <input
-                                type="date"
-                                value={batchDateTo}
-                                onChange={(e) => setBatchDateTo(e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
-                              />
-                            </div>
-                          </>
-                        )}
+                            {/* Calendar Popup */}
+                            {isCalendarPopupOpen && batchDateFilter === 'custom' && (
+                              <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-lg shadow-xl border border-gray-200 z-50 p-4 min-w-80">
+                                {/* Calendar Header */}
+                                <div className="flex items-center justify-between mb-4">
+                                  <button
+                                    onClick={() => navigateMonth('prev')}
+                                    className="p-2 hover:bg-gray-100 rounded-md transition-colors"
+                                  >
+                                    <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                                    </svg>
+                                  </button>
+                                  
+                                  <h3 className="text-lg font-semibold text-gray-900">
+                                    {calendarCurrentMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                                  </h3>
+                                  
+                                  <button
+                                    onClick={() => navigateMonth('next')}
+                                    className="p-2 hover:bg-gray-100 rounded-md transition-colors"
+                                  >
+                                    <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                    </svg>
+                                  </button>
+                                </div>
+
+                                {/* Calendar Grid */}
+                                <div className="grid grid-cols-7 gap-1 mb-4">
+                                  {/* Day headers */}
+                                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+                                    <div key={day} className="p-2 text-center text-xs font-medium text-gray-500">
+                                      {day}
+                                    </div>
+                                  ))}
+                                  
+                                  {/* Calendar dates */}
+                                  {getCalendarDates().map(({ date, isCurrentMonth }, index) => {
+                                    const dateStr = formatDateForInput(date);
+                                    const isSelected = isDateSelected(dateStr);
+                                    const isInRange = isDateInRange(dateStr, batchDateFrom, batchDateTo);
+                                    const isStart = dateStr === batchDateFrom;
+                                    const isEnd = dateStr === batchDateTo;
+                                    const isToday = dateStr === formatDateForInput(new Date());
+                                    
+                                    return (
+                                      <button
+                                        key={index}
+                                        onClick={() => isCurrentMonth && handleCalendarDateClick(dateStr)}
+                                        onMouseEnter={() => setCalendarHoverDate(dateStr)}
+                                        disabled={!isCurrentMonth}
+                                        className={`
+                                          p-2 text-sm rounded-md transition-all duration-150 relative
+                                          ${!isCurrentMonth ? 'text-gray-300 cursor-not-allowed' : 'text-gray-900 hover:bg-gray-100'}
+                                          ${isSelected ? 'bg-purple-600 text-white font-semibold' : ''}
+                                          ${isInRange && !isSelected ? 'bg-purple-100 text-purple-800' : ''}
+                                          ${isStart ? 'bg-green-600 text-white' : ''}
+                                          ${isEnd ? 'bg-red-600 text-white' : ''}
+                                          ${isToday && !isSelected ? 'border-2 border-blue-500 font-semibold' : ''}
+                                        `}
+                                      >
+                                        {date.getDate()}
+                                        {isToday && (
+                                          <div className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 rounded-full"></div>
+                                        )}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+
+                                {/* Quick Preset Buttons */}
+                                <div className="border-t pt-4">
+                                  <div className="text-xs font-medium text-gray-700 mb-2">Quick Select:</div>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    {[
+                                      { label: 'Last 7 Days', days: 7 },
+                                      { label: 'Last 30 Days', days: 30 },
+                                      { label: 'Last 90 Days', days: 90 },
+                                      { label: 'This Year', days: 365 }
+                                    ].map(({ label, days }) => (
+                                      <button
+                                        key={label}
+                                        onClick={() => setQuickDateRange(days)}
+                                        className="px-3 py-2 text-xs bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+                                      >
+                                        {label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                {/* Selected Range Display */}
+                                {batchDateFrom && batchDateTo && (
+                                  <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                                    <div className="flex items-center space-x-2">
+                                      <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                      </svg>
+                                      <div className="text-sm text-blue-800">
+                                        <span className="font-medium">Selected Range:</span>
+                                        <span className="ml-2">
+                                          {new Date(batchDateFrom).toLocaleDateString()} - {new Date(batchDateTo).toLocaleDateString()}
+                                        </span>
+                                                                                 <span className="ml-2 text-blue-600">
+                                           ({Math.ceil((new Date(batchDateTo).getTime() - new Date(batchDateFrom).getTime()) / (1000 * 60 * 60 * 24 * 1000)) + 1} days)
+                                         </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Close Button */}
+                                <div className="flex justify-end mt-4">
+                                  <button
+                                    onClick={() => setIsCalendarPopupOpen(false)}
+                                    className="px-4 py-2 bg-purple-600 text-white text-sm rounded-md hover:bg-purple-700 transition-colors"
+                                  >
+                                    Apply Filter
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
 
                         {/* Clear Filters */}
                         <div className="flex items-end">
@@ -2906,6 +3140,8 @@ const StockManager = () => {
                           </button>
                         </div>
                       </div>
+
+
                     </div>
 
                     {/* Sort Options */}
