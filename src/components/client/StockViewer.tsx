@@ -1,55 +1,26 @@
 import { useState, useEffect } from 'react';
+import { formatUSD } from '../../utils/calculations';
+import { mockClientStocks, type BeerStock, MOCK_API_DELAY } from '../../constants/mockData';
 import DataTable from '../DataTable';
 
-interface BeerStock {
+interface SelectedProduct {
   id: string;
   name: string;
-  type: string;
-  quantity: number;
-  sellingPrice: number;
-  available: boolean;
+  price: number;
 }
 
 interface StockViewerProps {
-  onProductSelect: (product: { id: string; name: string; price: number }) => void;
+  onProductSelect: (product: SelectedProduct) => void;
 }
 
 const StockViewer = ({ onProductSelect }: StockViewerProps) => {
   const [isLoading, setIsLoading] = useState(true);
   
-  // TODO: Replace with actual API call
-  const mockData: BeerStock[] = [
-    {
-      id: '1',
-      name: 'Pilsner Premium',
-      type: 'Pilsner',
-      quantity: 150,
-      sellingPrice: 4.99,
-      available: true,
-    },
-    {
-      id: '2',
-      name: 'Dark Stout',
-      type: 'Stout',
-      quantity: 85,
-      sellingPrice: 5.99,
-      available: true,
-    },
-    {
-      id: '3',
-      name: 'Summer Ale',
-      type: 'Ale',
-      quantity: 0,
-      sellingPrice: 4.49,
-      available: false,
-    },
-  ];
-
-  // Simulate API call
+  // Load mock data
   useEffect(() => {
     const timer = setTimeout(() => {
       setIsLoading(false);
-    }, 1000);
+    }, MOCK_API_DELAY);
     return () => clearTimeout(timer);
   }, []);
 
@@ -73,7 +44,7 @@ const StockViewer = ({ onProductSelect }: StockViewerProps) => {
     {
       header: 'Price',
       accessor: (item: BeerStock) => (
-        <span className="font-medium">${item.sellingPrice.toFixed(2)}</span>
+        <span className="font-medium">{formatUSD(item.sellingPrice)}</span>
       ),
       className: 'text-right',
     },
@@ -90,28 +61,28 @@ const StockViewer = ({ onProductSelect }: StockViewerProps) => {
   };
 
   return (
-    <div>
-      <div className="mb-4 flex justify-between items-center">
-        <div>
-          <h3 className="text-lg font-medium text-gray-900">Available Products</h3>
-          <p className="text-sm text-gray-500">
-            Click on a product to place an order
-          </p>
-        </div>
-        <button
-          onClick={() => setIsLoading(true)} // Simulated refresh
-          className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900"
-        >
-          Refresh
-        </button>
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-gray-900 font-sansation">Available Stock</h2>
+        <p className="text-gray-600 font-gotham">
+          Click on any available product to place an order
+        </p>
       </div>
-      
-      <DataTable
-        columns={columns}
-        data={mockData}
-        isLoading={isLoading}
-        onRowClick={handleRowClick}
-      />
+
+      <div className="bg-white rounded-lg shadow-md overflow-hidden">
+        <DataTable
+          columns={columns}
+          data={mockClientStocks}
+          isLoading={isLoading}
+          onRowClick={handleRowClick}
+        />
+      </div>
+
+      {!isLoading && mockClientStocks.filter(item => item.available).length === 0 && (
+        <div className="text-center py-8 text-gray-500">
+          <p>No products are currently available for order.</p>
+        </div>
+      )}
     </div>
   );
 };

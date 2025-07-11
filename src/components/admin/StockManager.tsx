@@ -1,44 +1,18 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { showToast } from '../../utils/toast';
+import { 
+  formatPeso, 
+  calculateTotalCost, 
+  calculateSellingPrice, 
+  calculateProfitMargin,
+  calculateWeightedAverageCost,
+  roundToDecimal,
+  safeNumber,
+  generateId
+} from '../../utils/calculations';
+import { mockAdminStocks, type BeerStock, type SupplyEntry, MOCK_API_DELAY } from '../../constants/mockData';
 import DataTable from '../DataTable';
-
-interface SupplyEntry {
-  id: string;
-  date: string;
-  quantity: number;
-  baseCost: number;
-  shippingCost: number;
-  additionalCosts: number;
-  totalCost: number;
-  notes?: string;
-  supplier?: string;
-  profitMargin: number;
-  priceChange: number;
-  averageCostChange: number;
-  priceBeforeLock?: number;
-  wasAutoCalculated: boolean;
-  priceLockChanged?: boolean;
-}
-
-interface BeerStock {
-  id: string;
-  name: string;
-  type: string;
-  quantity: number;
-  baseCost: number;
-  shippingCost: number;
-  additionalCosts: number;
-  markup: number;
-  isMarkupPercentage: boolean;
-  totalCost: number;
-  sellingPrice: number;
-  isPriceLocked: boolean;
-  available: boolean;
-  minimumStock: number;
-  supplier: string;
-  supplyHistory: SupplyEntry[];
-}
 
 interface StockFormData {
   name: string;
@@ -75,22 +49,15 @@ interface Column {
   sortField?: SortField;
 }
 
-const formatPeso = (amount: number): string => {
-  return new Intl.NumberFormat('en-PH', {
-    style: 'currency',
-    currency: 'PHP',
-  }).format(amount);
-};
-
 const StockManager = () => {
   const [isLoading, setIsLoading] = useState(true);
-  const [stocks, setStocks] = useState<BeerStock[]>([]);
+  const [stocks, setStocks] = useState<Required<BeerStock>[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [sortConfig, setSortConfig] = useState<{ field: SortField; order: SortOrder }>({
     field: 'name',
     order: 'asc',
   });
-  const [selectedStock, setSelectedStock] = useState<BeerStock | null>(null);
+  const [selectedStock, setSelectedStock] = useState<Required<BeerStock> | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isAddSupplyModalOpen, setIsAddSupplyModalOpen] = useState(false);
@@ -141,104 +108,12 @@ const StockManager = () => {
     shouldFocusError: false,
   });
 
-  // Mock data
-  const mockStocks: BeerStock[] = [
-    {
-      id: 'beer1',
-      name: 'Premium Lager',
-      type: 'Lager',
-      quantity: 150,
-      baseCost: 2.50,
-      shippingCost: 0.50,
-      additionalCosts: 0.20,
-      markup: 40,
-      isMarkupPercentage: true,
-      totalCost: 3.20,
-      sellingPrice: 4.48,
-      isPriceLocked: false,
-      available: true,
-      minimumStock: 50,
-      supplier: 'Premium Breweries Ltd',
-      supplyHistory: [
-        {
-          id: 'supply1',
-          date: '2023-10-20T10:00:00Z',
-          quantity: 50,
-          baseCost: 2.60,
-          shippingCost: 0.60,
-          additionalCosts: 0.25,
-          totalCost: 3.45,
-          notes: 'Good quality',
-          supplier: 'Craft Beer Co.',
-          profitMargin: 28.5,
-          priceChange: 0.15,
-          averageCostChange: 0.25,
-          wasAutoCalculated: true,
-          priceLockChanged: false,
-        },
-      ],
-    },
-    {
-      id: 'beer2',
-      name: 'Craft IPA',
-      type: 'IPA',
-      quantity: 80,
-      baseCost: 3.00,
-      shippingCost: 0.70,
-      additionalCosts: 0.30,
-      markup: 45,
-      isMarkupPercentage: true,
-      totalCost: 4.00,
-      sellingPrice: 5.80,
-      isPriceLocked: false,
-      available: true,
-      minimumStock: 30,
-      supplier: 'Craft Beer Co.',
-      supplyHistory: [
-        {
-          id: 'supply2',
-          date: '2023-10-19T14:30:00Z',
-          quantity: 30,
-          baseCost: 3.10,
-          shippingCost: 0.80,
-          additionalCosts: 0.35,
-          totalCost: 4.25,
-          notes: 'Quick delivery',
-          supplier: 'Premium Breweries Ltd',
-          profitMargin: 31.2,
-          priceChange: 0.20,
-          averageCostChange: 0.25,
-          wasAutoCalculated: true,
-          priceLockChanged: false,
-        },
-      ],
-    },
-    {
-      id: 'beer3',
-      name: 'Seasonal Ale',
-      type: 'Ale',
-      quantity: 100,
-      baseCost: 2.80,
-      shippingCost: 0.55,
-      additionalCosts: 0.25,
-      markup: 35,
-      isMarkupPercentage: true,
-      totalCost: 3.60,
-      sellingPrice: 4.86,
-      isPriceLocked: false,
-      available: true,
-      minimumStock: 40,
-      supplier: 'Seasonal Brews Inc',
-      supplyHistory: [],
-    },
-  ];
-
+  // Load mock data
   useEffect(() => {
-    // Simulate API call
     const timer = setTimeout(() => {
-      setStocks(mockStocks);
+      setStocks(mockAdminStocks);
       setIsLoading(false);
-    }, 1000);
+    }, MOCK_API_DELAY);
     return () => clearTimeout(timer);
   }, []);
 
@@ -252,7 +127,7 @@ const StockManager = () => {
         (stock) =>
           stock.name.toLowerCase().includes(searchLower) ||
           stock.type.toLowerCase().includes(searchLower) ||
-          stock.supplier.toLowerCase().includes(searchLower)
+          (stock.supplier || '').toLowerCase().includes(searchLower)
       );
     }
 
@@ -280,39 +155,35 @@ const StockManager = () => {
   const formValues = watch();
   
   const totalCost = useMemo(() => {
-    const baseCost = Number(formValues.baseCost) || 0;
-    const shippingCost = Number(formValues.shippingCost) || 0;
-    const additionalCosts = Number(formValues.additionalCosts) || 0;
-    return baseCost + shippingCost + additionalCosts;
+    return calculateTotalCost(
+      safeNumber(formValues.baseCost),
+      safeNumber(formValues.shippingCost),
+      safeNumber(formValues.additionalCosts)
+    );
   }, [formValues.baseCost, formValues.shippingCost, formValues.additionalCosts]);
 
   const calculatedSellingPrice = useMemo(() => {
     if (formValues.isPriceLocked) {
-      return Number(formValues.sellingPrice) || 0;
+      return safeNumber(formValues.sellingPrice);
     }
     
-    const markup = Number(formValues.markup) || 0;
-    
-    if (formValues.isMarkupPercentage) {
-      return totalCost * (1 + markup / 100);
-    } else {
-      return totalCost + markup;
-    }
+    return calculateSellingPrice(
+      totalCost,
+      safeNumber(formValues.markup),
+      formValues.isMarkupPercentage
+    );
   }, [totalCost, formValues.markup, formValues.isMarkupPercentage, formValues.isPriceLocked, formValues.sellingPrice]);
 
   // Update selling price when calculations change (only when price is not locked)
   useEffect(() => {
     if (!formValues.isPriceLocked && isModalOpen) {
-      // Round to 2 decimal places for currency
-      const roundedPrice = Math.round(calculatedSellingPrice * 100) / 100;
-      setValue('sellingPrice', roundedPrice);
+      setValue('sellingPrice', roundToDecimal(calculatedSellingPrice));
     }
   }, [calculatedSellingPrice, formValues.isPriceLocked, isModalOpen, setValue]);
 
-  const handleEdit = (stock: BeerStock) => {
+  const handleEdit = (stock: Required<BeerStock>) => {
     setSelectedStock(stock);
     setIsEditing(true);
-    // Clear any existing errors before resetting form
     clearErrors();
     reset({
       name: stock.name,
@@ -331,13 +202,13 @@ const StockManager = () => {
     setIsModalOpen(true);
   };
 
-  const handleAddSupply = (stock: BeerStock) => {
+  const handleAddSupply = (stock: Required<BeerStock>) => {
     setSelectedStock(stock);
     clearSupplyErrors();
     setIsAddSupplyModalOpen(true);
   };
 
-  const handleViewHistory = (stock: BeerStock) => {
+  const handleViewHistory = (stock: Required<BeerStock>) => {
     setSelectedStock(stock);
     setIsHistoryModalOpen(true);
   };
@@ -346,64 +217,55 @@ const StockManager = () => {
     setIsModalOpen(false);
     setSelectedStock(null);
     setIsEditing(false);
-    clearErrors(); // Clear any existing validation errors
-    reset(); // Reset form values
+    clearErrors();
+    reset();
   };
 
   const onSubmit = async (data: StockFormData) => {
     try {
       const loadingToastId = showToast.loading('Saving changes...');
       
-      // Ensure all numeric fields are properly converted
+      // Process form data with safe number conversion
       const processedData = {
         ...data,
-        quantity: Number(data.quantity) || 0,
-        baseCost: Number(data.baseCost) || 0,
-        shippingCost: Number(data.shippingCost) || 0,
-        additionalCosts: Number(data.additionalCosts) || 0,
-        markup: Number(data.markup) || 0,
-        minimumStock: Number(data.minimumStock) || 0,
-        sellingPrice: Number(data.sellingPrice) || 0,
+        quantity: safeNumber(data.quantity),
+        baseCost: safeNumber(data.baseCost),
+        shippingCost: safeNumber(data.shippingCost),
+        additionalCosts: safeNumber(data.additionalCosts),
+        markup: safeNumber(data.markup),
+        minimumStock: safeNumber(data.minimumStock),
+        sellingPrice: safeNumber(data.sellingPrice),
       };
 
-      // Calculate final values
-      const finalTotalCost = processedData.baseCost + processedData.shippingCost + processedData.additionalCosts;
+      // Calculate final values using utility functions
+      const finalTotalCost = calculateTotalCost(
+        processedData.baseCost,
+        processedData.shippingCost,
+        processedData.additionalCosts
+      );
       
-      let finalSellingPrice;
-      if (processedData.isPriceLocked) {
-        finalSellingPrice = processedData.sellingPrice;
-      } else {
-        finalSellingPrice = processedData.isMarkupPercentage
-          ? finalTotalCost * (1 + processedData.markup / 100)
-          : finalTotalCost + processedData.markup;
-      }
-      
-      // Round selling price to 2 decimal places
-      finalSellingPrice = Math.round(finalSellingPrice * 100) / 100;
+      const finalSellingPrice = processedData.isPriceLocked
+        ? processedData.sellingPrice
+        : calculateSellingPrice(finalTotalCost, processedData.markup, processedData.isMarkupPercentage);
 
-      const updatedData = {
+      const updatedData: Required<BeerStock> = {
+        id: selectedStock?.id || generateId(),
         ...processedData,
         totalCost: finalTotalCost,
-        sellingPrice: finalSellingPrice,
+        sellingPrice: roundToDecimal(finalSellingPrice),
         available: processedData.quantity > 0,
+        supplyHistory: selectedStock?.supplyHistory || [],
       };
 
       if (isEditing && selectedStock) {
         setStocks((prev) =>
           prev.map((stock) =>
-            stock.id === selectedStock.id
-              ? { ...stock, ...updatedData }
-              : stock
+            stock.id === selectedStock.id ? updatedData : stock
           )
         );
         showToast.update(loadingToastId, 'Stock updated successfully!', 'success');
       } else {
-        const newStock: BeerStock = {
-          id: Date.now().toString(),
-          ...updatedData,
-          supplyHistory: [],
-        };
-        setStocks((prev) => [...prev, newStock]);
+        setStocks((prev) => [...prev, updatedData]);
         showToast.update(loadingToastId, 'New stock added successfully!', 'success');
       }
 
@@ -420,53 +282,48 @@ const StockManager = () => {
     const loadingToastId = showToast.loading('Adding supply...');
     
     try {
-      // Ensure all values are numbers
-      const quantity = Number(data.quantity) || 0;
-      const baseCost = Number(data.baseCost) || 0;
-      const shippingCost = Number(data.shippingCost) || 0;
-      const additionalCosts = Number(data.additionalCosts) || 0;
+      // Convert and validate input data
+      const quantity = safeNumber(data.quantity);
+      const baseCost = safeNumber(data.baseCost);
+      const shippingCost = safeNumber(data.shippingCost);
+      const additionalCosts = safeNumber(data.additionalCosts);
       
-      const newSupplyTotalCost = baseCost + shippingCost + additionalCosts;
-      const oldTotalValue = selectedStock.totalCost * selectedStock.quantity;
-      const newSupplyTotalValue = newSupplyTotalCost * quantity;
+      const newSupplyTotalCost = calculateTotalCost(baseCost, shippingCost, additionalCosts);
+      const newAverageCost = calculateWeightedAverageCost(
+        selectedStock.quantity,
+        selectedStock.totalCost,
+        quantity,
+        newSupplyTotalCost
+      );
+      const roundedAverageCost = roundToDecimal(newAverageCost);
       const combinedQuantity = selectedStock.quantity + quantity;
-      
-      // Calculate new weighted average cost
-      const newAverageCost = combinedQuantity > 0 
-        ? (oldTotalValue + newSupplyTotalValue) / combinedQuantity 
-        : 0;
-      
-      // Round to 2 decimal places
-      const roundedAverageCost = Math.round(newAverageCost * 100) / 100;
 
       const supplyEntry: SupplyEntry = {
-        id: Date.now().toString(),
+        id: generateId(),
         date: new Date().toISOString(),
-        quantity: quantity,
-        baseCost: baseCost,
-        shippingCost: shippingCost,
-        additionalCosts: additionalCosts,
+        quantity,
+        baseCost,
+        shippingCost,
+        additionalCosts,
         totalCost: newSupplyTotalCost,
         notes: data.notes,
         supplier: data.supplier || selectedStock.supplier,
-        profitMargin: roundedAverageCost > 0 
-          ? ((selectedStock.sellingPrice - roundedAverageCost) / roundedAverageCost) * 100 
-          : 0,
+        profitMargin: calculateProfitMargin(selectedStock.sellingPrice, roundedAverageCost),
         priceChange: 0,
         averageCostChange: roundedAverageCost - selectedStock.totalCost,
         wasAutoCalculated: true,
         priceLockChanged: false,
       };
 
-      // Calculate new selling price if not price locked
+      // Calculate new selling price if not locked
       let newSellingPrice = selectedStock.sellingPrice;
       if (!selectedStock.isPriceLocked) {
-        if (selectedStock.isMarkupPercentage) {
-          newSellingPrice = roundedAverageCost * (1 + selectedStock.markup / 100);
-        } else {
-          newSellingPrice = roundedAverageCost + selectedStock.markup;
-        }
-        newSellingPrice = Math.round(newSellingPrice * 100) / 100;
+        newSellingPrice = calculateSellingPrice(
+          roundedAverageCost,
+          selectedStock.markup,
+          selectedStock.isMarkupPercentage
+        );
+        newSellingPrice = roundToDecimal(newSellingPrice);
       }
 
       setStocks((prev) =>
@@ -479,7 +336,7 @@ const StockManager = () => {
                 totalCost: roundedAverageCost,
                 sellingPrice: newSellingPrice,
                 available: true,
-                supplyHistory: [supplyEntry, ...(stock.supplyHistory || [])],
+                supplyHistory: [supplyEntry, ...stock.supplyHistory],
               }
             : stock
         )
@@ -495,16 +352,13 @@ const StockManager = () => {
     }
   };
 
-  const handlePriceLockToggle = (stock: BeerStock, newLockState: boolean) => {
+  const handlePriceLockToggle = (stock: Required<BeerStock>, newLockState: boolean) => {
     const loadingToastId = showToast.loading(newLockState ? 'Locking price...' : 'Unlocking price...');
     
     try {
-      // Update the stock
       setStocks((prev) =>
         prev.map((s) =>
-          s.id === stock.id
-            ? { ...s, isPriceLocked: newLockState }
-            : s
+          s.id === stock.id ? { ...s, isPriceLocked: newLockState } : s
         )
       );
 
@@ -531,7 +385,7 @@ const StockManager = () => {
     }
   };
 
-  const handleDelete = async (stock: BeerStock) => {
+  const handleDelete = async (stock: Required<BeerStock>) => {
     if (window.confirm(`Are you sure you want to delete "${stock.name}"?`)) {
       const loadingToastId = showToast.loading('Deleting stock...');
 
@@ -544,8 +398,6 @@ const StockManager = () => {
       }
     }
   };
-
-
 
   const columns: Column[] = [
     {
@@ -565,16 +417,16 @@ const StockManager = () => {
         <div className="flex flex-col">
           <span
             className={`font-medium ${
-              stock.quantity <= stock.minimumStock
+              stock.quantity <= (stock.minimumStock || 0)
                 ? 'text-red-600'
                 : 'text-gray-900'
             }`}
           >
             {stock.quantity}
           </span>
-          {stock.quantity <= stock.minimumStock && (
+          {stock.quantity <= (stock.minimumStock || 0) && (
             <span className="text-xs text-red-600">
-              Below minimum ({stock.minimumStock})
+              Below minimum ({stock.minimumStock || 0})
             </span>
           )}
         </div>
@@ -585,7 +437,7 @@ const StockManager = () => {
     {
       header: 'Base Cost',
       accessor: (stock: BeerStock) => (
-        <span className="font-medium">{formatPeso(stock.baseCost)}</span>
+        <span className="font-medium">{formatPeso(stock.baseCost || 0)}</span>
       ),
       className: 'text-right',
       sortable: true,
@@ -594,7 +446,7 @@ const StockManager = () => {
     {
       header: 'Total Cost',
       accessor: (stock: BeerStock) => (
-        <span className="font-medium">{formatPeso(stock.totalCost)}</span>
+        <span className="font-medium">{formatPeso(stock.totalCost || 0)}</span>
       ),
       className: 'text-right',
       sortable: true,
@@ -608,7 +460,7 @@ const StockManager = () => {
           <button
             onClick={(e) => {
               e.stopPropagation();
-              handlePriceLockToggle(stock, !stock.isPriceLocked);
+              handlePriceLockToggle(stock as Required<BeerStock>, !(stock.isPriceLocked || false));
             }}
             className={`p-1 rounded ${
               stock.isPriceLocked
@@ -649,7 +501,7 @@ const StockManager = () => {
     {
       header: 'Profit Margin',
       accessor: (stock: BeerStock) => {
-        const margin = ((stock.sellingPrice - stock.totalCost) / stock.totalCost) * 100;
+        const margin = calculateProfitMargin(stock.sellingPrice, stock.totalCost || 0);
         return (
           <span
             className={`font-medium ${
@@ -673,7 +525,7 @@ const StockManager = () => {
           <button
             onClick={(e) => {
               e.stopPropagation();
-              handleAddSupply(stock);
+              handleAddSupply(stock as Required<BeerStock>);
             }}
             className="p-1.5 text-gray-600 hover:text-[#BE202E] hover:bg-red-50 rounded-lg transition-colors duration-200"
             title="Add supply"
@@ -696,7 +548,7 @@ const StockManager = () => {
           <button
             onClick={(e) => {
               e.stopPropagation();
-              handleEdit(stock);
+              handleEdit(stock as Required<BeerStock>);
             }}
             className="p-1.5 text-gray-600 hover:text-[#BE202E] hover:bg-red-50 rounded-lg transition-colors duration-200"
             title="Edit stock"
@@ -719,7 +571,7 @@ const StockManager = () => {
           <button
             onClick={(e) => {
               e.stopPropagation();
-              handleViewHistory(stock);
+              handleViewHistory(stock as Required<BeerStock>);
             }}
             className="p-1.5 text-gray-600 hover:text-[#BE202E] hover:bg-red-50 rounded-lg transition-colors duration-200"
             title="View history"
@@ -742,7 +594,7 @@ const StockManager = () => {
           <button
             onClick={(e) => {
               e.stopPropagation();
-              handleDelete(stock);
+              handleDelete(stock as Required<BeerStock>);
             }}
             className="p-1.5 text-gray-600 hover:text-[#BE202E] hover:bg-red-50 rounded-lg transition-colors duration-200"
             title="Delete stock"

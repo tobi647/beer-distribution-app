@@ -3,6 +3,7 @@ import DashboardLayout from '../layouts/DashboardLayout';
 import StockViewer from '../components/client/StockViewer';
 import OrderForm from '../components/client/OrderForm';
 import OrderHistoryList from '../components/client/OrderHistoryList';
+import { showToast } from '../utils/toast';
 
 interface SelectedProduct {
   id: string;
@@ -29,80 +30,98 @@ const ClientDashboard = () => {
 
   const handleOrderSubmit = async (orderData: OrderData) => {
     try {
-      // TODO: Implement order submission to backend
-      console.log('Submitting order:', {
+      const loadingToastId = showToast.loading('Processing your order...');
+      
+      // Simulate API call delay
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // In production, this would be an API call to submit the order
+      const orderPayload = {
         ...orderData,
         productName: selectedProduct?.name,
         productPrice: selectedProduct?.price,
-      });
+        totalPrice: (selectedProduct?.price || 0) * orderData.quantity,
+        orderDate: new Date().toISOString(),
+        status: 'pending',
+      };
       
-      // Show success message (you might want to add a toast notification here)
-      alert('Order placed successfully!');
+      showToast.update(loadingToastId, 'Order placed successfully!', 'success');
       
       // Reset selection after order is placed
       setSelectedProduct(undefined);
       setActiveTab('history');
     } catch (error) {
       console.error('Error submitting order:', error);
-      alert('Failed to place order. Please try again.');
+      showToast.error('Failed to place order. Please try again.');
+    }
+  };
+
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'stock':
+        return <StockViewer onProductSelect={handleProductSelect} />;
+      case 'order':
+        return (
+          <OrderForm 
+            onSubmit={handleOrderSubmit} 
+            selectedProduct={selectedProduct} 
+          />
+        );
+      case 'history':
+        return <OrderHistoryList />;
+      default:
+        return <StockViewer onProductSelect={handleProductSelect} />;
     }
   };
 
   return (
     <DashboardLayout userType="client">
-      {/* Tab Navigation */}
-      <div className="mb-6">
-        <nav className="flex space-x-4">
-          <button
-            onClick={() => setActiveTab('stock')}
-            className={`px-3 py-2 rounded-md ${
-              activeTab === 'stock'
-                ? 'bg-blue-500 text-white'
-                : 'text-gray-600 hover:bg-gray-200'
-            }`}
-          >
-            View Stock
-          </button>
-          <button
-            onClick={() => setActiveTab('order')}
-            className={`px-3 py-2 rounded-md ${
-              activeTab === 'order'
-                ? 'bg-blue-500 text-white'
-                : 'text-gray-600 hover:bg-gray-200'
-            }`}
-          >
-            Place Order
-          </button>
-          <button
-            onClick={() => setActiveTab('history')}
-            className={`px-3 py-2 rounded-md ${
-              activeTab === 'history'
-                ? 'bg-blue-500 text-white'
-                : 'text-gray-600 hover:bg-gray-200'
-            }`}
-          >
-            Order History
-          </button>
-        </nav>
-      </div>
+      <div className="space-y-6">
+        {/* Tab Navigation */}
+        <div className="border-b border-gray-200">
+          <nav className="-mb-px flex space-x-8" aria-label="Tabs">
+            <button
+              onClick={() => setActiveTab('stock')}
+              className={`whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'stock'
+                  ? 'border-[#BE202E] text-[#BE202E]'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Available Stock
+            </button>
+            <button
+              onClick={() => setActiveTab('order')}
+              className={`whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'order'
+                  ? 'border-[#BE202E] text-[#BE202E]'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Place Order
+              {selectedProduct && (
+                <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-[#BE202E] text-white">
+                  {selectedProduct.name}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab('history')}
+              className={`whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'history'
+                  ? 'border-[#BE202E] text-[#BE202E]'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Order History
+            </button>
+          </nav>
+        </div>
 
-      {/* Content Area */}
-      <div className="bg-white shadow-sm rounded-lg p-6">
-        {activeTab === 'stock' && (
-          <StockViewer onProductSelect={handleProductSelect} />
-        )}
-
-        {activeTab === 'order' && (
-          <div>
-            <h2 className="text-xl font-semibold mb-4">Place New Order</h2>
-            <OrderForm
-              onSubmit={handleOrderSubmit}
-              selectedProduct={selectedProduct}
-            />
-          </div>
-        )}
-
-        {activeTab === 'history' && <OrderHistoryList />}
+        {/* Tab Content */}
+        <div className="flex-1">
+          {renderTabContent()}
+        </div>
       </div>
     </DashboardLayout>
   );
