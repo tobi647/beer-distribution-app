@@ -11,7 +11,10 @@ import {
   safeNumber,
   generateId,
   downloadCSV,
-  arrayToCSV
+  arrayToCSV,
+  generateBatchId,
+  calculateBatchComparison,
+  formatBatchComparison
 } from '../../utils/calculations';
 import { mockAdminStocks, type BeerStock, type SupplyEntry, MOCK_API_DELAY } from '../../constants/mockData';
 import DataTable from '../DataTable';
@@ -38,6 +41,12 @@ interface AddSupplyFormData {
   additionalCosts: number;
   notes?: string;
   supplier?: string;
+  // Enhanced batch tracking fields
+  batchNumber?: string;
+  deliveryDate?: string;
+  origin?: string;
+  shippingMethod?: string;
+  reasonForCostChange?: string;
 }
 
 type SortField = 'name' | 'type' | 'quantity' | 'baseCost' | 'totalCost' | 'sellingPrice' | 'minimumStock';
@@ -281,7 +290,7 @@ const StockManager = () => {
   const handleAddSupplySubmit = async (data: AddSupplyFormData) => {
     if (!selectedStock) return;
 
-    const loadingToastId = showToast.loading('Adding supply...');
+    const loadingToastId = showToast.loading('Adding supply batch...');
     
     try {
       // Convert and validate input data
@@ -300,9 +309,22 @@ const StockManager = () => {
       const roundedAverageCost = roundToDecimal(newAverageCost);
       const combinedQuantity = selectedStock.quantity + quantity;
 
+      // Calculate batch comparison if there's previous supply history
+      let comparisonToPrevious;
+      if (selectedStock.supplyHistory.length > 0) {
+        const lastSupply = selectedStock.supplyHistory[0];
+        comparisonToPrevious = calculateBatchComparison(
+          baseCost, shippingCost, additionalCosts,
+          lastSupply.baseCost, lastSupply.shippingCost, lastSupply.additionalCosts
+        );
+      }
+
+      const batchId = generateBatchId();
+      const currentDate = new Date();
+      
       const supplyEntry: SupplyEntry = {
         id: generateId(),
-        date: new Date().toISOString(),
+        date: currentDate.toISOString(),
         quantity,
         baseCost,
         shippingCost,
@@ -315,6 +337,14 @@ const StockManager = () => {
         averageCostChange: roundedAverageCost - selectedStock.totalCost,
         wasAutoCalculated: true,
         priceLockChanged: false,
+        // Enhanced batch tracking
+        batchId,
+        batchNumber: data.batchNumber || `${selectedStock.name.substring(0, 3).toUpperCase()}-${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(selectedStock.supplyHistory.length + 1).padStart(3, '0')}`,
+        deliveryDate: data.deliveryDate,
+        origin: data.origin,
+        shippingMethod: data.shippingMethod,
+        reasonForCostChange: data.reasonForCostChange,
+        comparisonToPrevious
       };
 
       // Calculate new selling price if not locked
@@ -344,13 +374,13 @@ const StockManager = () => {
         )
       );
 
-      showToast.update(loadingToastId, `Successfully added ${quantity} units`, 'success');
+      showToast.update(loadingToastId, `Successfully added batch ${supplyEntry.batchNumber} (${quantity} units)`, 'success');
       setIsAddSupplyModalOpen(false);
       clearSupplyErrors();
       resetSupply();
     } catch (error) {
       console.error('Error adding supply:', error);
-      showToast.update(loadingToastId, 'Failed to add supply', 'error');
+      showToast.update(loadingToastId, 'Failed to add supply batch', 'error');
     }
   };
 
@@ -412,6 +442,8 @@ const StockManager = () => {
       const headers = [
         'Date',
         'Time',
+        'Batch ID',
+        'Batch Number',
         'Quantity',
         'Base Cost (₱)',
         'Shipping Cost (₱)',
@@ -419,7 +451,12 @@ const StockManager = () => {
         'Total Cost per Unit (₱)',
         'Total Investment (₱)',
         'Supplier',
+        'Origin',
+        'Shipping Method',
+        'Delivery Date',
         'Notes',
+        'Reason for Cost Change',
+        'Cost vs Previous Batch',
         'Profit Margin (%)',
         'Price Change (₱)',
         'Avg Cost Change (₱)'
@@ -428,6 +465,8 @@ const StockManager = () => {
       const csvData = stock.supplyHistory.map(entry => [
         new Date(entry.date).toLocaleDateString(),
         new Date(entry.date).toLocaleTimeString(),
+        entry.batchId,
+        entry.batchNumber || '',
         entry.quantity,
         entry.baseCost.toFixed(2),
         entry.shippingCost.toFixed(2),
@@ -435,7 +474,12 @@ const StockManager = () => {
         entry.totalCost.toFixed(2),
         (entry.quantity * entry.totalCost).toFixed(2),
         entry.supplier || '',
+        entry.origin || '',
+        entry.shippingMethod || '',
+        entry.deliveryDate || '',
         entry.notes || '',
+        entry.reasonForCostChange || '',
+        entry.comparisonToPrevious ? formatBatchComparison(entry.comparisonToPrevious) : 'N/A (First batch)',
         entry.profitMargin.toFixed(1),
         entry.priceChange.toFixed(2),
         entry.averageCostChange.toFixed(2)
@@ -1213,7 +1257,7 @@ const StockManager = () => {
       {/* Enhanced Add Supply Modal */}
       {isAddSupplyModalOpen && selectedStock && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-screen overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-6xl max-h-screen overflow-y-auto">
             {/* Modal Header */}
             <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-[#BE202E] to-[#9A1B24]">
               <div className="flex justify-between items-center">
@@ -1236,7 +1280,7 @@ const StockManager = () => {
             </div>
             
             <form onSubmit={handleSubmitSupply(handleAddSupplySubmit)} className="p-6">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 
                 {/* Left Column - Supply Details */}
                 <div className="space-y-6">
@@ -1280,9 +1324,10 @@ const StockManager = () => {
                           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#BE202E] focus:border-transparent"
                           placeholder="Enter supplier name"
                           list="supply-suppliers"
-                          defaultValue={selectedStock.supplier}
+                          defaultValue="Bauhinia Brewery"
                         />
                         <datalist id="supply-suppliers">
+                          <option value="Bauhinia Brewery" />
                           <option value="Premium Breweries Ltd" />
                           <option value="Craft Beer Co." />
                           <option value="Seasonal Brews Inc" />
@@ -1301,6 +1346,102 @@ const StockManager = () => {
                           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#BE202E] focus:border-transparent"
                           placeholder="Enter any notes about this supply delivery"
                         />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Middle Column - Batch Tracking */}
+                <div className="space-y-6">
+                  <div className="bg-purple-50 rounded-lg p-4">
+                    <h4 className="text-lg font-semibold text-purple-900 mb-4 flex items-center">
+                      <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M3 3a1 1 0 000 2v8a2 2 0 002 2h2.586l-1.293 1.293a1 1 0 101.414 1.414L10 15.414l2.293 2.293a1 1 0 001.414-1.414L12.414 15H15a2 2 0 002-2V5a1 1 0 100-2H3zm11.707 4.707a1 1 0 00-1.414-1.414L10 9.586 8.707 8.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"/>
+                      </svg>
+                      Batch Tracking
+                    </h4>
+
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Batch Number
+                        </label>
+                        <input
+                          {...registerSupply('batchNumber')}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#BE202E] focus:border-transparent"
+                          placeholder="Auto-generated if empty"
+                        />
+                        <p className="mt-1 text-xs text-gray-500">
+                          Leave empty for auto-generation
+                        </p>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Origin/Source
+                        </label>
+                        <input
+                          {...registerSupply('origin')}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#BE202E] focus:border-transparent"
+                          placeholder="e.g., Bauhinia Brewery"
+                          list="origins"
+                          defaultValue="Bauhinia Brewery"
+                        />
+                        <datalist id="origins">
+                          <option value="Bauhinia Brewery" />
+                          <option value="Munich, Germany" />
+                          <option value="Portland, Oregon, USA" />
+                          <option value="Dublin, Ireland" />
+                          <option value="Prague, Czech Republic" />
+                          <option value="Pilsen, Czech Republic" />
+                          <option value="Brussels, Belgium" />
+                          <option value="Manila, Philippines" />
+                        </datalist>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Shipping Method
+                        </label>
+                        <select
+                          {...registerSupply('shippingMethod')}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#BE202E] focus:border-transparent"
+                        >
+                          <option value="">Select shipping method</option>
+                          <option value="Sea Freight">Sea Freight</option>
+                          <option value="Sea Freight + Refrigerated Truck">Sea Freight + Refrigerated Truck</option>
+                          <option value="Air Freight">Air Freight</option>
+                          <option value="Air Freight Express">Air Freight Express</option>
+                          <option value="Ground Transport">Ground Transport</option>
+                          <option value="Local Delivery">Local Delivery</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Delivery Date
+                        </label>
+                        <input
+                          type="date"
+                          {...registerSupply('deliveryDate')}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#BE202E] focus:border-transparent"
+                          max={new Date().toISOString().split('T')[0]}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Reason for Cost Change
+                        </label>
+                        <textarea
+                          {...registerSupply('reasonForCostChange')}
+                          rows={3}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#BE202E] focus:border-transparent"
+                          placeholder="e.g., Fuel prices increased, Premium ingredients, Urgent delivery required"
+                        />
+                        <p className="mt-1 text-xs text-gray-500">
+                          Explain cost differences from previous batches
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -1477,7 +1618,7 @@ const StockManager = () => {
       {/* Enhanced History Modal */}
       {isHistoryModalOpen && selectedStock && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-6xl max-h-screen overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-7xl max-h-screen overflow-y-auto">
             {/* Modal Header */}
             <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-[#BE202E] to-[#9A1B24]">
               <div className="flex justify-between items-center">
@@ -1580,22 +1721,25 @@ const StockManager = () => {
                               Date & Time
                             </th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Batch Info
+                            </th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                               Quantity
                             </th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                               Unit Costs
                             </th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Total Cost
+                              Cost vs Previous
                             </th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                               Investment
                             </th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Supplier
+                              Origin & Shipping
                             </th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Notes
+                              Supplier & Notes
                             </th>
                           </tr>
                         </thead>
@@ -1608,6 +1752,16 @@ const StockManager = () => {
                                   <div className="text-xs text-gray-500">{new Date(entry.date).toLocaleTimeString()}</div>
                                 </div>
                               </td>
+                              <td className="px-6 py-4 text-sm text-gray-900">
+                                <div className="space-y-1">
+                                  <div className="font-medium text-purple-600">{entry.batchNumber || entry.batchId}</div>
+                                  {entry.deliveryDate && (
+                                    <div className="text-xs text-gray-500">
+                                      Delivered: {new Date(entry.deliveryDate).toLocaleDateString()}
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                                   +{entry.quantity} units
@@ -1615,24 +1769,49 @@ const StockManager = () => {
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                 <div className="space-y-1">
-                                  <div>Base: {formatPeso(entry.baseCost)}</div>
+                                  <div className="font-medium">{formatPeso(entry.totalCost)}</div>
                                   <div className="text-xs text-gray-500">
-                                    Ship: {formatPeso(entry.shippingCost)} | Add: {formatPeso(entry.additionalCosts)}
+                                    Base: {formatPeso(entry.baseCost)} | Ship: {formatPeso(entry.shippingCost)} | Add: {formatPeso(entry.additionalCosts)}
                                   </div>
                                 </div>
                               </td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                {formatPeso(entry.totalCost)}
+                              <td className="px-6 py-4 text-sm text-gray-900">
+                                {entry.comparisonToPrevious ? (
+                                  <div className="space-y-1">
+                                    <div className={`font-medium ${entry.comparisonToPrevious.totalCostDiff >= 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                      {formatBatchComparison(entry.comparisonToPrevious)}
+                                    </div>
+                                    {entry.reasonForCostChange && (
+                                      <div className="text-xs text-gray-500 max-w-xs truncate" title={entry.reasonForCostChange}>
+                                        {entry.reasonForCostChange}
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-gray-500">First batch</span>
+                                )}
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600">
                                 {formatPeso(entry.quantity * entry.totalCost)}
                               </td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                {entry.supplier || '-'}
+                              <td className="px-6 py-4 text-sm text-gray-900">
+                                <div className="space-y-1">
+                                  {entry.origin && (
+                                    <div className="text-xs font-medium">{entry.origin}</div>
+                                  )}
+                                  {entry.shippingMethod && (
+                                    <div className="text-xs text-gray-500">{entry.shippingMethod}</div>
+                                  )}
+                                </div>
                               </td>
-                              <td className="px-6 py-4 text-sm text-gray-900 max-w-xs">
-                                <div className="truncate" title={entry.notes}>
-                                  {entry.notes || '-'}
+                              <td className="px-6 py-4 text-sm text-gray-900">
+                                <div className="space-y-1">
+                                  <div className="font-medium">{entry.supplier || '-'}</div>
+                                  {entry.notes && (
+                                    <div className="text-xs text-gray-500 max-w-xs truncate" title={entry.notes}>
+                                      {entry.notes}
+                                    </div>
+                                  )}
                                 </div>
                               </td>
                             </tr>

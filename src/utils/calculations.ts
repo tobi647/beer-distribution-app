@@ -156,4 +156,51 @@ export const arrayToCSV = (data: (string | number)[][]): string => {
   return data.map(row => 
     row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')
   ).join('\n');
+};
+
+/**
+ * Generates a unique batch ID with timestamp and sequence
+ */
+export const generateBatchId = (): string => {
+  const date = new Date().toISOString().split('T')[0];
+  const time = Date.now().toString().slice(-6);
+  return `BATCH-${date}-${time}`;
+};
+
+/**
+ * Calculates cost comparison between current and previous batch
+ */
+export const calculateBatchComparison = (
+  currentBaseCost: number,
+  currentShippingCost: number,
+  currentAdditionalCosts: number,
+  previousBaseCost: number,
+  previousShippingCost: number,
+  previousAdditionalCosts: number
+) => {
+  const currentTotal = calculateTotalCost(currentBaseCost, currentShippingCost, currentAdditionalCosts);
+  const previousTotal = calculateTotalCost(previousBaseCost, previousShippingCost, previousAdditionalCosts);
+  
+  return {
+    baseCostDiff: roundToDecimal(currentBaseCost - previousBaseCost),
+    shippingCostDiff: roundToDecimal(currentShippingCost - previousShippingCost),
+    additionalCostsDiff: roundToDecimal(currentAdditionalCosts - previousAdditionalCosts),
+    totalCostDiff: roundToDecimal(currentTotal - previousTotal),
+    percentageChange: previousTotal > 0 ? roundToDecimal(((currentTotal - previousTotal) / previousTotal) * 100) : 0
+  };
+};
+
+/**
+ * Formats batch comparison for display
+ */
+export const formatBatchComparison = (comparison: {
+  baseCostDiff: number;
+  shippingCostDiff: number;
+  additionalCostsDiff: number;
+  totalCostDiff: number;
+  percentageChange: number;
+}): string => {
+  const { totalCostDiff, percentageChange } = comparison;
+  const sign = totalCostDiff >= 0 ? '+' : '';
+  return `${sign}${formatPeso(totalCostDiff)} (${sign}${percentageChange}%)`;
 }; 

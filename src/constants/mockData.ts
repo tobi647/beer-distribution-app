@@ -37,6 +37,20 @@ export interface SupplyEntry {
   priceBeforeLock?: number;
   wasAutoCalculated: boolean;
   priceLockChanged?: boolean;
+  // Enhanced batch tracking fields
+  batchId: string;
+  batchNumber?: string;
+  deliveryDate?: string;
+  origin?: string;
+  shippingMethod?: string;
+  reasonForCostChange?: string;
+  comparisonToPrevious?: {
+    baseCostDiff: number;
+    shippingCostDiff: number;
+    additionalCostsDiff: number;
+    totalCostDiff: number;
+    percentageChange: number;
+  };
 }
 
 export interface Order {
@@ -76,13 +90,26 @@ export const mockAdminStocks: Required<BeerStock>[] = [
         shippingCost: 0.60,
         additionalCosts: 0.25,
         totalCost: 3.45,
-        notes: 'Good quality',
+        notes: 'Good quality batch with premium hops',
         supplier: 'Craft Beer Co.',
         profitMargin: 28.5,
         priceChange: 0.15,
         averageCostChange: 0.25,
         wasAutoCalculated: true,
         priceLockChanged: false,
+        batchId: 'BATCH-2023-10-20-001',
+        batchNumber: 'PL-2023-42',
+        deliveryDate: '2023-10-20',
+        origin: 'Munich, Germany',
+        shippingMethod: 'Sea Freight + Refrigerated Truck',
+        reasonForCostChange: 'Premium hops and increased shipping costs due to fuel prices',
+        comparisonToPrevious: {
+          baseCostDiff: 0.10,
+          shippingCostDiff: 0.10,
+          additionalCostsDiff: 0.05,
+          totalCostDiff: 0.25,
+          percentageChange: 7.8,
+        },
       },
     ],
   },
@@ -111,13 +138,26 @@ export const mockAdminStocks: Required<BeerStock>[] = [
         shippingCost: 0.80,
         additionalCosts: 0.35,
         totalCost: 4.25,
-        notes: 'Quick delivery',
+        notes: 'Quick delivery, express shipping due to urgent demand',
         supplier: 'Premium Breweries Ltd',
         profitMargin: 31.2,
         priceChange: 0.20,
         averageCostChange: 0.25,
         wasAutoCalculated: true,
         priceLockChanged: false,
+        batchId: 'BATCH-2023-10-19-002',
+        batchNumber: 'IPA-2023-43',
+        deliveryDate: '2023-10-19',
+        origin: 'Portland, Oregon, USA',
+        shippingMethod: 'Air Freight Express',
+        reasonForCostChange: 'Express shipping required for urgent restocking, premium craft ingredients',
+        comparisonToPrevious: {
+          baseCostDiff: 0.10,
+          shippingCostDiff: 0.10,
+          additionalCostsDiff: 0.05,
+          totalCostDiff: 0.25,
+          percentageChange: 6.3,
+        },
       },
     ],
   },
