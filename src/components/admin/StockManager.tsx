@@ -9,7 +9,9 @@ import {
   calculateWeightedAverageCost,
   roundToDecimal,
   safeNumber,
-  generateId
+  generateId,
+  downloadCSV,
+  arrayToCSV
 } from '../../utils/calculations';
 import { mockAdminStocks, type BeerStock, type SupplyEntry, MOCK_API_DELAY } from '../../constants/mockData';
 import DataTable from '../DataTable';
@@ -396,6 +398,73 @@ const StockManager = () => {
         console.error('Error deleting stock:', error);
         showToast.update(loadingToastId, 'Failed to delete stock', 'error');
       }
+    }
+  };
+
+  const handleExportSupplyHistory = (stock: Required<BeerStock>) => {
+    if (!stock.supplyHistory || stock.supplyHistory.length === 0) {
+      showToast.warning('No supply history data to export');
+      return;
+    }
+
+    try {
+      // Prepare CSV data
+      const headers = [
+        'Date',
+        'Time',
+        'Quantity',
+        'Base Cost (₱)',
+        'Shipping Cost (₱)',
+        'Additional Costs (₱)',
+        'Total Cost per Unit (₱)',
+        'Total Investment (₱)',
+        'Supplier',
+        'Notes',
+        'Profit Margin (%)',
+        'Price Change (₱)',
+        'Avg Cost Change (₱)'
+      ];
+
+      const csvData = stock.supplyHistory.map(entry => [
+        new Date(entry.date).toLocaleDateString(),
+        new Date(entry.date).toLocaleTimeString(),
+        entry.quantity,
+        entry.baseCost.toFixed(2),
+        entry.shippingCost.toFixed(2),
+        entry.additionalCosts.toFixed(2),
+        entry.totalCost.toFixed(2),
+        (entry.quantity * entry.totalCost).toFixed(2),
+        entry.supplier || '',
+        entry.notes || '',
+        entry.profitMargin.toFixed(1),
+        entry.priceChange.toFixed(2),
+        entry.averageCostChange.toFixed(2)
+      ]);
+
+      // Create comprehensive CSV content with summary info
+      const summaryData = [
+        [`Supply History Report - ${stock.name}`],
+        [`Generated on: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}`],
+        [`Product: ${stock.name} (${stock.type})`],
+        [`Current Stock: ${stock.quantity} units`],
+        [`Current Selling Price: ${formatPeso(stock.sellingPrice)}`],
+        [`Total Supply Records: ${stock.supplyHistory.length}`],
+        [`Total Units Added: ${stock.supplyHistory.reduce((sum, entry) => sum + entry.quantity, 0)}`],
+        [`Total Investment: ${formatPeso(stock.supplyHistory.reduce((sum, entry) => sum + (entry.quantity * entry.totalCost), 0))}`],
+        [`Average Cost per Unit: ${formatPeso(stock.supplyHistory.reduce((sum, entry) => sum + entry.totalCost, 0) / stock.supplyHistory.length)}`],
+        [''], // Empty row
+        headers,
+        ...csvData
+      ];
+
+      const csvContent = arrayToCSV(summaryData);
+      const filename = `supply-history-${stock.name.replace(/\s+/g, '-').toLowerCase()}-${new Date().toISOString().split('T')[0]}.csv`;
+      
+      downloadCSV(csvContent, filename);
+      showToast.success(`Supply history exported successfully`);
+    } catch (error) {
+      console.error('Error exporting supply history:', error);
+      showToast.error('Failed to export supply history. Please try again.');
     }
   };
 
@@ -1490,7 +1559,18 @@ const StockManager = () => {
                   {/* Enhanced Table */}
                   <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
                     <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
-                      <h4 className="text-lg font-semibold text-gray-900">Supply Records</h4>
+                      <div className="flex justify-between items-center">
+                        <h4 className="text-lg font-semibold text-gray-900">Supply Records</h4>
+                        <button
+                          onClick={() => handleExportSupplyHistory(selectedStock)}
+                          className="inline-flex items-center px-3 py-1.5 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 transition-colors"
+                        >
+                          <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                          Export
+                        </button>
+                      </div>
                     </div>
                     <div className="overflow-x-auto">
                       <table className="min-w-full divide-y divide-gray-200">
@@ -1596,15 +1676,26 @@ const StockManager = () => {
                 </div>
                 <div className="flex space-x-3">
                   {selectedStock.supplyHistory && selectedStock.supplyHistory.length > 0 && (
-                    <button
-                      onClick={() => {
-                        setIsHistoryModalOpen(false);
-                        setIsAddSupplyModalOpen(true);
-                      }}
-                      className="px-4 py-2 bg-[#BE202E] text-white rounded-lg hover:bg-opacity-90 transition-colors font-medium"
-                    >
-                      Add New Supply
-                    </button>
+                    <>
+                      <button
+                        onClick={() => handleExportSupplyHistory(selectedStock)}
+                        className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+                      >
+                        <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        Export CSV
+                      </button>
+                      <button
+                        onClick={() => {
+                          setIsHistoryModalOpen(false);
+                          setIsAddSupplyModalOpen(true);
+                        }}
+                        className="px-4 py-2 bg-[#BE202E] text-white rounded-lg hover:bg-opacity-90 transition-colors font-medium"
+                      >
+                        Add New Supply
+                      </button>
+                    </>
                   )}
                   <button
                     onClick={() => setIsHistoryModalOpen(false)}

@@ -128,4 +128,32 @@ export const getOrderStatusClass = (status: string): string => {
     default:
       return 'bg-gray-100 text-gray-800';
   }
+};
+
+/**
+ * Utility function to download data as CSV file
+ */
+export const downloadCSV = (content: string, filename: string): void => {
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  
+  if (link.download !== undefined) {
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+};
+
+/**
+ * Converts array data to CSV format
+ */
+export const arrayToCSV = (data: (string | number)[][]): string => {
+  return data.map(row => 
+    row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')
+  ).join('\n');
 }; 
